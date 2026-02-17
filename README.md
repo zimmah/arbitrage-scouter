@@ -103,7 +103,7 @@ This project demonstrates production-quality async Rust development through a li
 **Decision**: Use `anyhow::Result` for application-level errors  
 **Reasoning**: 
 - Simple, ergonomic error handling
-- Good for applications (vs libraries which should use `thiserror`)
+- Good for applications
 - Easy context addition with `.context()`   
 
 **Tradeoff**: Less type-safe than custom error enums, but appropriate for apps
@@ -176,7 +176,7 @@ cargo test
 # Press 'q' or Ctrl+C to exit gracefully
 ```
 
-A width of at least 72 characters is recommended
+A width of at least 80 characters is recommended
 
 ## Sample Output
 
