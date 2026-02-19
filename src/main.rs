@@ -4,9 +4,9 @@ mod ui;
 mod websocket;
 
 use anyhow::Result;
-use std::Sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 
 use crate::orderbook::OrderBookManager;
 use crate::websocket::run_websocket_client;
@@ -17,7 +17,7 @@ use crate::types::Config;
 async fn main() -> Result<()> {
     // Configuration
     let config = Config {
-        min_profit_bps: 10 // 0.10% = 10 basis points
+        min_profit_bps: 10, // 0.10% = 10 basis points
         detection_interval_ms: 1000,
         ui_refresh_interval_ms: 250,
     };
@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
     ];
 
     // Shared state: order books and detected opportunities
-    let orderbook_manager = Arc::new(RwLock::new(OrderBookManager::new(config.clone())));
+    let orderbook_manager = Arc::new(RwLock::new(OrderBookManager::new()));
     // todo: arbitrage detector
     // let arbitrage_detector = Arc etc
 
@@ -54,6 +54,7 @@ async fn main() -> Result<()> {
 
     // todo
     // Spawn arbitrage detection task
+    // let detection_handle = etc...
 
     // Run the TUI (blocks until user exits)
     let tui_result = run_tui(
@@ -64,7 +65,7 @@ async fn main() -> Result<()> {
 
     // Cleanup: abort background tasks
     ws_handle.abort();
-    detection_handle.abort();
+    // detection_handle.abort(); // uncomment once decection handle is implemented
 
     tui_result
 }

@@ -61,7 +61,7 @@ async fn run_ui_loop(
         // Get current data
         let (books, stats) = {
             let manager = orderbook_manager.read().await;
-            (manager.get_fresh_books(), manager.get_stats())
+            (manager.get_books(), manager.get_stats())
         };
         // let opportunities = arbitrage_detector.get_opportunities().await;
 
@@ -69,7 +69,7 @@ async fn run_ui_loop(
         terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constaints([
+                .constraints([
                     Constraint::Length(3), // Header
                     Constraint::Min(10), // Order Books
                     Constraint::Length(15), // Opportunities
@@ -151,7 +151,7 @@ fn render_orderbooks(
         sorted_books.sort_by_key(|(symbol, _)| symbol.as_str());
 
         for (symbol, book) in sorted_books {
-            if let (Some(bid), Some(ask)) = (book.best_bid, book.best_ask()) {
+            if let (Some(bid), Some(ask)) = (book.best_bid(), book.best_ask()) {
                 let spread_bps = book.spread_bps().unwrap_or(0);
 
                 let line = Line::from(vec![
@@ -173,6 +173,7 @@ fn render_orderbooks(
     f.render_widget(list, area);
 }
 
+// Placeholder
 fn render_opportunities(
     f: &mut ratatui::Frame,
     area: Rect,

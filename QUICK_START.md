@@ -83,7 +83,6 @@ Edit `main.rs` to adjust:
 ```rust
 let config = Config {
     min_profit_bps: 10,          // Minimum profit to report (0.10%)
-    max_orderbook_age_secs: 10,  // Stale data threshold
     detection_interval_ms: 1000, // How often to check (1 second)
     ui_refresh_interval_ms: 250, // UI refresh rate (250ms = 4 FPS)
 };

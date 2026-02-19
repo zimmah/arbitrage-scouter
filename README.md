@@ -9,7 +9,7 @@ A real-time cryptocurrency arbitrage detection system built in Rust, showcasing 
 
 This project demonstrates production-quality async Rust development through a live arbitrage detection system. It connects to Kraken's WebSocket API, monitors order books, and detects triangular arbitrage opportunities in real-time.
 
-**⚠️ Educational Purpose Only**: This is a portfolio/learning project, not a trading system. It does not execute trades and is not financial advice.
+**⚠️ Educational Purpose Only**: This is a portfolio project, not a trading system. It does not execute trades and is not financial advice.
 
 ## Key Features
 
@@ -244,7 +244,6 @@ Modify the `Config` struct in `main.rs`:
 ```rust
 let config = Config {
     min_profit_bps: 10,              // 0.10% minimum (10 basis points)
-    max_orderbook_age_secs: 10,      // Stale data threshold
     detection_interval_ms: 1000,     // Check every 1 second
     ui_refresh_interval_ms: 250,     // 4 FPS refresh rate
 };
