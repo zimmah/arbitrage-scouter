@@ -73,7 +73,7 @@ async fn run_ui_loop(
                     Constraint::Length(3), // Header
                     Constraint::Min(10), // Order Books
                     Constraint::Length(15), // Opportunities
-                    Constraint::Length(5), // Stats
+                    Constraint::Length(6), // Stats
                 ])
                 .split(f.area());
 
@@ -142,7 +142,7 @@ fn render_orderbooks(
         ])));
         items.push(ListItem::new(Line::from(vec![
             Span::styled(
-                "(Check terminal for debug messages)",
+                "(Check debug.log for debug messages",
                 Style::default().fg(Color::DarkGray),
             ),
         ])));
@@ -157,9 +157,9 @@ fn render_orderbooks(
                 let line = Line::from(vec![
                     Span::styled(format!("{:12}", symbol), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
                     Span::raw("  Bid: "),
-                    Span::styled(format!("{:>12.4}", bid.price), Style::default().fg(Color::Green)), // need to rethink this style, for some pairs the decimal place doesn't make sense, but good enough for demo
+                    Span::styled(format!("{:>12.4}", bid.price.value), Style::default().fg(Color::Green)), // need to rethink this style, for some pairs the decimal place doesn't make sense, but good enough for demo
                     Span::raw("  Ask: "),
-                    Span::styled(format!("{:>12.4}", ask.price), Style::default().fg(Color::Red)),
+                    Span::styled(format!("{:>12.4}", ask.price.value), Style::default().fg(Color::Red)),
                     Span::raw("  Spread: "),
                     Span::styled(format!("{:>4} bps", spread_bps), Style::default().fg(Color::Yellow)),
                 ]);
@@ -196,6 +196,9 @@ fn render_stats(
     area: Rect,
     stats: &crate::types::Statistics,
 ) {
+    let checksum_color = if stats.all_checksums_valid { Color::Green } else { Color::Red };
+    let checksum_text = if stats.all_checksums_valid { "✅ All valid" } else { "❌ Invalid" };
+
     let text = vec![
         Line::from(vec![
             Span::styled("Order Book Updates: ", Style::default().fg(Color::Gray)),
@@ -211,6 +214,10 @@ fn render_stats(
                 format!("{:.2}%", stats.best_opportunity_bps as f64 / 100.0),
                 Style::default().fg(Color::Green),
             ),
+        ]),
+        Line::from(vec![
+            Span::styled("Valid Checksums: ", Style::default().fg(Color::Gray)),
+            Span::styled(checksum_text, Style::default().fg(checksum_color)),
         ]),
     ];
 

@@ -1,5 +1,24 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
+
+use crate::utils::format_value;
+
+fn deserialize_number_as_raw_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // Capture the raw JSON value - for numbers this preserves the exact text
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::String(s) => Ok(s),
+        Value::Number(n) => Ok(n.to_string()), // serde::json::Number preserves the original representation
+        _ => Err(serde::de::Error::custom("expected string or number")),
+    }
+}
 
 /// Application configuration
 #[derive(Debug, Clone)]
@@ -33,21 +52,87 @@ impl OrderBook {
         self.asks.first()
     }
 
+    pub fn build_side(
+        &self,
+        levels: Vec<(String, String)>,
+        descending: bool,
+    ) -> Vec<PriceLevel> {
+            let mut result: Vec<PriceLevel> = levels
+                .into_iter()
+                .filter_map(|(price, qty)| PriceLevel::new(price.to_string(), qty.to_string()))
+                .filter(|level| level.has_nonzero_quantity())
+                .collect();
+
+            if descending {
+                result.sort_by(|a, b| b.price.value.cmp(&a.price.value));
+            } else {
+                result.sort_by(|a, b| a.price.value.cmp(&b.price.value));
+            }
+
+            result.truncate(10);
+            result
+    }
+
     pub fn spread_bps(&self) -> Option<u32> {
         match (self.best_bid(), self.best_ask()) {
             (Some(bid), Some(ask)) => {
-                let spread = (ask.price - bid.price) / bid.price;
-                Some((spread * 10000.0) as u32)
+                let spread = (ask.price.value - bid.price.value) / bid.price.value;
+                let bps = spread * Decimal::from(10000);
+                bps.to_u32()
             }
             _ => None,
         }
+    }
+
+    pub fn has_valid_checksum(&self) -> bool {
+        let asks_str: String = self.asks
+            .iter()
+            .map(|ask| format!("{}{}", format_value(&ask.price.raw), format_value(&ask.quantity.raw)))
+            .collect();
+        let bids_str: String = self.bids
+            .iter()
+            .map(|bid| format!("{}{}", format_value(&bid.price.raw), format_value(&bid.quantity.raw)))
+            .collect();
+        
+        let combined = format!("{}{}", asks_str, bids_str);
+
+        let checksum = crc32fast::hash(combined.as_bytes());
+
+        checksum == self.checksum.unwrap_or(0)
+        // crc32fast::hash(combined.as_bytes()) == self.checksum.unwrap_or(0)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CanonicalDecimal {
+    pub value: Decimal,
+    pub raw: String,
+}
+
+impl CanonicalDecimal {
+    pub fn new(raw: String) -> Option<Self> {
+        let value = Decimal::from_str_exact(&raw).ok()?;
+        Some(Self { value, raw })
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct PriceLevel {
-    pub price: f64,
-    pub quantity: f64,
+    pub price: CanonicalDecimal,
+    pub quantity: CanonicalDecimal,
+}
+
+impl PriceLevel {
+    pub fn new(price_str: String, quantity_str: String) -> Option<Self> {
+        Some(Self { 
+            price: CanonicalDecimal::new(price_str)?,
+            quantity: CanonicalDecimal::new(quantity_str)?,
+        })
+    }
+
+    fn has_nonzero_quantity(&self) -> bool {
+        self.quantity.value > Decimal::ZERO
+    }
 }
 
 // /// A detected arbitrage opportunity
@@ -96,6 +181,7 @@ pub struct Statistics {
     pub total_opportunities_found: u64,
     pub best_opportunity_bps: u32,
     pub uptime_seconds: u64,
+    pub all_checksums_valid: bool,
 }
 
 // ============================================================================
@@ -136,6 +222,9 @@ pub struct BookData {
 
 #[derive(Deserialize, Debug)]
 pub struct BookLevel {
-    pub price: f64,
-    pub qty: f64,
+    #[serde(deserialize_with = "deserialize_number_as_raw_string")]
+    pub price:  String,
+    #[serde(deserialize_with = "deserialize_number_as_raw_string")]
+    pub qty: String,
 }
+

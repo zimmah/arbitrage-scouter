@@ -137,6 +137,11 @@ async fn handle_message(
                 }
                 return Ok(());
             }
+            // Check if it's a status update
+            if text.contains("\"channel\":\"status\"") {
+                debug_log(&format!("[Websocket] Status update: {}", &text[..text.len().min(200)]));
+                return Ok(());
+            }
             // Check if it's a heartbeat
             if text.contains("heartbeat") {
                 return Ok(());
@@ -182,14 +187,14 @@ async fn update_orderbook(
     book_data: BookData,
 ) {
     // Extract bids and asks
-    let bids: Vec<(f64, f64)> = book_data
+    let bids: Vec<(String, String)> = book_data
         .bids
         .unwrap_or_default()
         .into_iter()
         .map(|level| (level.price, level.qty))
         .collect();
 
-    let asks: Vec<(f64, f64)> = book_data
+    let asks: Vec<(String, String)> = book_data
         .asks
         .unwrap_or_default()
         .into_iter()

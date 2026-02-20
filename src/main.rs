@@ -2,6 +2,7 @@ mod orderbook;
 mod types;
 mod ui;
 mod websocket;
+mod utils;
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -48,7 +49,7 @@ async fn main() -> Result<()> {
     eprintln!("(Debug info will be written to debug.log)");
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    eprintln!("Strating TUI...\n");
+    eprintln!("Starting TUI...\n");
     // Small delay to let messages finish printing
     tokio::time::sleep(Duration::from_millis(500)).await;
 

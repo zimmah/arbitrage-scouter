@@ -3,7 +3,12 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 
-use crate::types::{OrderBook, PriceLevel, Statistics};
+#[allow(unused_imports)]
+use rust_decimal::Decimal;
+#[allow(unused_imports)]
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
+
+use crate::types::{OrderBook, Statistics};
 
 fn debug_log(msg: &str) {
     if let Ok(mut file) = OpenOptions::new()
@@ -36,17 +41,23 @@ impl OrderBookManager {
         }
     }
 
+    pub fn all_checksums_valid(&self) -> bool {
+        self.books.values().all(|book| book.has_valid_checksum())
+    }
+
     /// Update or insert an order book
     /// Kraken sends:
     /// - Initial snapshot (contains full order book)
     /// - Updates (only changed levels)
-    pub fn update_book(
+    pub fn update_book<S: AsRef<str>>(
         &mut self,
         symbol: String,
-        bids: Vec<(f64, f64)>,
-        asks: Vec<(f64, f64)>,
+        bids: Vec<(S, S)>,
+        asks: Vec<(S, S)>,
         checksum: Option<u32>,
     ) {
+        let bids: Vec<(String, String)> = bids.into_iter().map(|(p, q)| (p.as_ref().to_string(), q.as_ref().to_string())).collect();
+        let asks: Vec<(String, String)> = asks.into_iter().map(|(p, q)| (p.as_ref().to_string(), q.as_ref().to_string())).collect();
         // Debug first few updates
         static UPDATE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let count = UPDATE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -67,26 +78,12 @@ impl OrderBookManager {
 
         // Update bids if provided
         if !bids.is_empty() {
-            let mut bid_levels: Vec<PriceLevel> = bids
-                .into_iter()
-                .map(|(price, qty)| PriceLevel { price, quantity: qty })
-                .filter(|level| level.quantity > 0.0) // Remove zero-quantity levels
-                .collect();
-            bid_levels.sort_by(|a, b| b.price.partial_cmp(&a.price).unwrap());
-            bid_levels.truncate(10); // Keep top 10 only
-            book.bids = bid_levels;
+            book.bids = book.build_side(bids, true);
         }
 
         // Update asks if provided
         if !asks.is_empty() {
-            let mut ask_levels: Vec<PriceLevel> = asks
-                .into_iter()
-                .map(|(price, qty)| PriceLevel { price, quantity: qty })
-                .filter(|level| level.quantity > 0.0) // Remove zero-quantity levels
-                .collect();
-            ask_levels.sort_by(|a, b| a.price.partial_cmp(&b.price).unwrap());
-            ask_levels.truncate(10); // Keep top 10 only
-            book.asks = ask_levels;
+            book.asks = book.build_side(asks, false);
         }
 
         // Update timestamp and checksum
@@ -95,6 +92,7 @@ impl OrderBookManager {
 
         self.books.insert(symbol.clone(), book);
         self.stats.total_orderbook_updates += 1;
+        self.stats.all_checksums_valid = self.all_checksums_valid();
 
         if count < 10 {
             let stored_book = self.books.get(&symbol).unwrap();
@@ -155,20 +153,36 @@ mod tests {
         let mut manager = OrderBookManager::new();
 
         // Bids should be sorted descending (highest first)
-        let bids = vec![(100.0, 1.0), (102.0, 2.0), (101.0, 1.5)];
+        let bids = vec![("100.0", "1.0"), ("102.0", "2.0"), ("101.0", "1.5")];
         // Asks should be sorted ascending (lowest first)
-        let asks = vec![(105.0, 1.0), (103.0, 2.0), (104.0, 1.5)];
+        let asks = vec![("105.0", "1.0"), ("103.0", "2.0"), ("104.0", "1.5")];
 
         manager.update_book("TEST/USD".to_string(), bids, asks, None);
 
         let book = manager.books.get("TEST/USD").unwrap();
         
-        assert_eq!(book.bids[0].price, 102.0);
-        assert_eq!(book.bids[1].price, 101.0);
-        assert_eq!(book.bids[2].price, 100.0);
+        assert_eq!(book.bids[0].price.value, Decimal::from_f32(102.0).expect("should be 102.0"));
+        assert_eq!(book.bids[1].price.value, Decimal::from_f32(101.0).expect("should be 101.0"));
+        assert_eq!(book.bids[2].price.value, Decimal::from_f32(100.0).expect("should be 100.0"));
 
-        assert_eq!(book.asks[0].price, 103.0);
-        assert_eq!(book.asks[1].price, 104.0);
-        assert_eq!(book.asks[2].price, 105.0);
+        assert_eq!(book.asks[0].price.value, Decimal::from_f32(103.0).expect("should be 103.0"));
+        assert_eq!(book.asks[1].price.value, Decimal::from_f32(104.0).expect("should be 104.0"));
+        assert_eq!(book.asks[2].price.value, Decimal::from_f32(105.0).expect("should be 105.0"));
+    }
+
+    #[test]
+    fn test_checksum_verification() {
+        let mut manager = OrderBookManager::new();
+
+        // The checksum example provided at https://docs.kraken.com/api/docs/guides/spot-ws-book-v2/ should correctly parse, otherwise the checksum detection is flawed
+        let bids = vec![("45283.5", "0.10000000"), ("45283.4", "1.54582015"), ("45282.1", "0.10000000"), ("45281.0", "0.10000000"), ("45280.3", "1.54592586"), ("45279.0", "0.07990000"), ("45277.6", "0.03310103"), ("45277.5", "0.30000000"), ("45277.3", "1.54602737"), ("45276.6", "0.15445238")];
+        let asks = vec![("45285.2", "0.00100000"), ("45286.4", "1.54571953"), ("45286.6", "1.54571109"), ("45289.6", "1.54560911"), ("45290.2", "0.15890660"), ("45291.8", "1.54553491"), ("45294.7", "0.04454749"), ("45296.1", "0.35380000"), ("45297.5", "0.09945542"), ("45299.5", "0.18772827")];
+        let checksum = 3310070434;
+
+        manager.update_book("TEST/USD".to_string(), bids, asks, Some(checksum));
+
+        let book = manager.books.get("TEST/USD").unwrap();
+
+        assert!(book.has_valid_checksum());
     }
 }

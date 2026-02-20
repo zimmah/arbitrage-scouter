@@ -27,6 +27,8 @@ anyhow = "1.0"
 
 # Utilities
 chrono = "0.4"
+crc32fast = "1.5.0"
+rust_decimal = "1.40.0"
 
 [profile.release]
 opt-level = 3
