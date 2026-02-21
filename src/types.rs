@@ -1,24 +1,11 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
-use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use std::collections::BTreeMap;
 
-use crate::utils::format_value;
-
-fn deserialize_number_as_raw_string<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    // Capture the raw JSON value - for numbers this preserves the exact text
-    let value = Value::deserialize(deserializer)?;
-    match value {
-        Value::String(s) => Ok(s),
-        Value::Number(n) => Ok(n.to_string()), // serde::json::Number preserves the original representation
-        _ => Err(serde::de::Error::custom("expected string or number")),
-    }
-}
+use crate::utils::{format_value, debug_log};
 
 /// Application configuration
 #[derive(Debug, Clone)]
@@ -44,9 +31,9 @@ pub struct CanonicalDecimal {
 }
 
 impl CanonicalDecimal {
-    pub fn new(raw: String) -> Option<Self> {
-        let value = Decimal::from_str_exact(&raw).ok()?;
-        Some(Self { value, raw })
+    pub fn from_raw(raw_json: &str) -> Option<Self> {
+        let value = Decimal::from_str_exact(raw_json).ok()?;
+        Some(Self { value, raw: raw_json.to_owned() })
     }
 }
 
@@ -159,6 +146,10 @@ impl OrderBook {
     }
 
     pub fn has_valid_checksum(&self) -> bool {
+        let Some(expected) = self.checksum else {
+            return true; // no checksum to validate against yet
+        };
+
         let asks_str: String = self.asks
             .values()
             .map(|level| format!("{}{}", format_value(&level.price.raw), format_value(&level.quantity.raw)))
@@ -171,7 +162,24 @@ impl OrderBook {
             .collect();
         
         let combined = format!("{}{}", asks_str, bids_str);
-        crc32fast::hash(combined.as_bytes()) == self.checksum.unwrap_or(0)
+        let computed = crc32fast::hash(combined.as_bytes());
+    
+        if computed != expected {
+            debug_log(&format!("[checksum FAIL] symbol: {}", self.symbol));
+            debug_log(&format!("  asks_str: {}", asks_str));
+            debug_log(&format!("  bids_str: {}", bids_str));
+            debug_log(&format!("  combined: {}", combined));
+            debug_log(&format!("  computed: {} expected: {}", computed, expected));
+            // Log the raw price/qty values to spot formatting issues
+            for level in self.asks.values() {
+                debug_log(&format!("  ask raw: price='{}' qty='{}'", level.price.raw, level.quantity.raw));
+            }
+            for level in self.bids.values().rev() {
+                debug_log(&format!("  bid raw: price='{}' qty='{}'", level.price.raw, level.quantity.raw));
+            }
+        }
+
+        computed == expected
     }
 }
 
@@ -184,8 +192,8 @@ pub struct PriceLevel {
 impl PriceLevel {
     pub fn new(price_str: String, quantity_str: String) -> Option<Self> {
         Some(Self { 
-            price: CanonicalDecimal::new(price_str)?,
-            quantity: CanonicalDecimal::new(quantity_str)?,
+            price: CanonicalDecimal::from_raw(&price_str)?,
+            quantity: CanonicalDecimal::from_raw(&quantity_str)?,
         })
     }
 
@@ -281,9 +289,7 @@ pub struct BookData {
 
 #[derive(Deserialize, Debug)]
 pub struct BookLevel {
-    #[serde(deserialize_with = "deserialize_number_as_raw_string")]
-    pub price:  String,
-    #[serde(deserialize_with = "deserialize_number_as_raw_string")]
-    pub qty: String,
+    pub price:  Box<RawValue>,
+    pub qty: Box<RawValue>,
 }
 

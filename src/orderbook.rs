@@ -1,25 +1,13 @@
 use chrono::Utc;
 use std::collections::{HashMap};
-use std::fs::OpenOptions;
-use std::io::Write;
-
 #[allow(unused_imports)]
 use rust_decimal::Decimal;
 #[allow(unused_imports)]
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
-
 #[allow(unused_imports)]
-use crate::types::{PriceLevel, OrderBook, Statistics};
 
-fn debug_log(msg: &str) {
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("debug.log")
-    {
-        let _ = writeln!(file, "{}", msg);
-    }
-}
+use crate::types::{PriceLevel, OrderBook, Statistics};
+use crate::utils::debug_log;
 
 /// Manages all order books and ensures data accuracy by checksum
 /// 

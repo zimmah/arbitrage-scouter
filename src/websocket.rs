@@ -1,7 +1,5 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -9,16 +7,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::orderbook::OrderBookManager;
 use crate::types::{BookData, KrakenMessage, KrakenSubscribe, SubscribeParams};
-
-fn debug_log(msg: &str) {
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("debug.log")
-    {
-        let _ = writeln!(file, "{}", msg);
-    }
-}
+use crate::utils::debug_log;
 
 /// Run the WebSocket client with automatic reconnection
 /// 
@@ -190,9 +179,9 @@ async fn update_orderbook(
     is_snapshot: bool,
 ) {
     let bids = book_data.bids.unwrap_or_default()
-        .into_iter().map(|l| (l.price, l.qty)).collect();
+        .into_iter().map(|l| (l.price.get().to_owned(), l.qty.get().to_owned())).collect();
     let asks = book_data.asks.unwrap_or_default()
-        .into_iter().map(|l| (l.price, l.qty)).collect();
+        .into_iter().map(|l| (l.price.get().to_owned(), l.qty.get().to_owned())).collect();
 
     let mut manager = orderbook_manager.write().await;
     manager.update_book(book_data.symbol, bids, asks, book_data.checksum, is_snapshot);
