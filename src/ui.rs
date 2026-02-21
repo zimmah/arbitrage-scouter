@@ -72,7 +72,7 @@ async fn run_ui_loop(
                 .constraints([
                     Constraint::Length(3), // Header
                     Constraint::Min(10), // Order Books
-                    Constraint::Length(15), // Opportunities
+                    Constraint::Min(15), // Opportunities
                     Constraint::Length(6), // Stats
                 ])
                 .split(f.area());
