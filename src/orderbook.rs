@@ -1,5 +1,5 @@
 use chrono::Utc;
-use std::collections::HashMap;
+use std::collections::{HashMap};
 use std::fs::OpenOptions;
 use std::io::Write;
 
@@ -8,7 +8,8 @@ use rust_decimal::Decimal;
 #[allow(unused_imports)]
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 
-use crate::types::{OrderBook, Statistics};
+#[allow(unused_imports)]
+use crate::types::{PriceLevel, OrderBook, Statistics};
 
 fn debug_log(msg: &str) {
     if let Ok(mut file) = OpenOptions::new()
@@ -49,16 +50,15 @@ impl OrderBookManager {
     /// Kraken sends:
     /// - Initial snapshot (contains full order book)
     /// - Updates (only changed levels)
-    pub fn update_book<S: AsRef<str>>(
+    pub fn update_book(
         &mut self,
         symbol: String,
-        bids: Vec<(S, S)>,
-        asks: Vec<(S, S)>,
+        bids: Vec<(String, String)>,
+        asks: Vec<(String, String)>,
         checksum: Option<u32>,
+        is_snapshot: bool,
     ) {
-        let bids: Vec<(String, String)> = bids.into_iter().map(|(p, q)| (p.as_ref().to_string(), q.as_ref().to_string())).collect();
-        let asks: Vec<(String, String)> = asks.into_iter().map(|(p, q)| (p.as_ref().to_string(), q.as_ref().to_string())).collect();
-        // Debug first few updates
+        // Debug log first few updates
         static UPDATE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let count = UPDATE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
@@ -67,37 +67,30 @@ impl OrderBookManager {
                 count, symbol, bids.len(), asks.len()));
         }
 
-        // Get existing book or create new one
-        let mut book = self.books.get(&symbol).cloned().unwrap_or_else(|| OrderBook {
-            symbol: symbol.clone(),
-            bids: Vec::new(),
-            asks: Vec::new(),
-            timestamp: Utc::now(),
-            checksum: None,
-        });
+        // Scoped block so the mutable borrow of 'book' end before we use 'self' again
+        let (bid_count, ask_count) = {
+            // Get existing book or create new one
+            let book = self.books.entry(symbol.clone()).or_insert_with(|| OrderBook::new(symbol));
+            
+            if is_snapshot {
+                book.load_snapshot(bids, asks);
+            } else {
+                book.apply_update(bids, asks);
+            }
+            
+            // Update timestamp and checksum
+            book.timestamp = Utc::now();
+            book.checksum = checksum.or(book.checksum);
 
-        // Update bids if provided
-        if !bids.is_empty() {
-            book.bids = book.build_side(bids, true);
-        }
+            (book.bids.len(), book.asks.len())
+        };
 
-        // Update asks if provided
-        if !asks.is_empty() {
-            book.asks = book.build_side(asks, false);
-        }
-
-        // Update timestamp and checksum
-        book.timestamp = Utc::now();
-        book.checksum = checksum.or(book.checksum);
-
-        self.books.insert(symbol.clone(), book);
         self.stats.total_orderbook_updates += 1;
         self.stats.all_checksums_valid = self.all_checksums_valid();
 
         if count < 10 {
-            let stored_book = self.books.get(&symbol).unwrap();
             debug_log(&format!("  -> Stored. Total books: {}, This book has {} bids, {} asks",
-                self.books.len(), stored_book.bids.len(), stored_book.asks.len()));
+                self.books.len(), bid_count, ask_count));
         }
     }
 
@@ -152,22 +145,24 @@ mod tests {
     fn test_orderbook_sorting() {
         let mut manager = OrderBookManager::new();
 
-        // Bids should be sorted descending (highest first)
-        let bids = vec![("100.0", "1.0"), ("102.0", "2.0"), ("101.0", "1.5")];
-        // Asks should be sorted ascending (lowest first)
-        let asks = vec![("105.0", "1.0"), ("103.0", "2.0"), ("104.0", "1.5")];
+        let bids = vec![("100.0", "1.0"), ("102.0", "2.0"), ("101.0", "1.5")].iter().map(|(s, t)| (s.to_string(), t.to_string())).collect();
+        let asks = vec![("105.0", "1.0"), ("103.0", "2.0"), ("104.0", "1.5")].iter().map(|(s, t)| (s.to_string(), t.to_string())).collect();
 
-        manager.update_book("TEST/USD".to_string(), bids, asks, None);
+        manager.update_book("TEST/USD".to_string(), bids, asks, None, true);
 
         let book = manager.books.get("TEST/USD").unwrap();
-        
-        assert_eq!(book.bids[0].price.value, Decimal::from_f32(102.0).expect("should be 102.0"));
-        assert_eq!(book.bids[1].price.value, Decimal::from_f32(101.0).expect("should be 101.0"));
-        assert_eq!(book.bids[2].price.value, Decimal::from_f32(100.0).expect("should be 100.0"));
 
-        assert_eq!(book.asks[0].price.value, Decimal::from_f32(103.0).expect("should be 103.0"));
-        assert_eq!(book.asks[1].price.value, Decimal::from_f32(104.0).expect("should be 104.0"));
-        assert_eq!(book.asks[2].price.value, Decimal::from_f32(105.0).expect("should be 105.0"));
+        // Bids: BTreeMap is ascending internally, iterate in reverse for highest-first
+        let bids: Vec<&PriceLevel> = book.bids.values().rev().collect();
+        assert_eq!(bids[0].price.value, Decimal::from_str_exact("102.0").unwrap());
+        assert_eq!(bids[1].price.value, Decimal::from_str_exact("101.0").unwrap());
+        assert_eq!(bids[2].price.value, Decimal::from_str_exact("100.0").unwrap());
+
+        // Asks: BTreeMap natural order is already ascending (lowest first)
+        let asks: Vec<&PriceLevel> = book.asks.values().collect();
+        assert_eq!(asks[0].price.value, Decimal::from_str_exact("103.0").unwrap());
+        assert_eq!(asks[1].price.value, Decimal::from_str_exact("104.0").unwrap());
+        assert_eq!(asks[2].price.value, Decimal::from_str_exact("105.0").unwrap());
     }
 
     #[test]
@@ -175,11 +170,13 @@ mod tests {
         let mut manager = OrderBookManager::new();
 
         // The checksum example provided at https://docs.kraken.com/api/docs/guides/spot-ws-book-v2/ should correctly parse, otherwise the checksum detection is flawed
-        let bids = vec![("45283.5", "0.10000000"), ("45283.4", "1.54582015"), ("45282.1", "0.10000000"), ("45281.0", "0.10000000"), ("45280.3", "1.54592586"), ("45279.0", "0.07990000"), ("45277.6", "0.03310103"), ("45277.5", "0.30000000"), ("45277.3", "1.54602737"), ("45276.6", "0.15445238")];
-        let asks = vec![("45285.2", "0.00100000"), ("45286.4", "1.54571953"), ("45286.6", "1.54571109"), ("45289.6", "1.54560911"), ("45290.2", "0.15890660"), ("45291.8", "1.54553491"), ("45294.7", "0.04454749"), ("45296.1", "0.35380000"), ("45297.5", "0.09945542"), ("45299.5", "0.18772827")];
+        let bids = vec![("45283.5", "0.10000000"), ("45283.4", "1.54582015"), ("45282.1", "0.10000000"), ("45281.0", "0.10000000"), ("45280.3", "1.54592586"), ("45279.0", "0.07990000"), ("45277.6", "0.03310103"), ("45277.5", "0.30000000"), ("45277.3", "1.54602737"), ("45276.6", "0.15445238")]
+            .iter().map(|(s, t)| (s.to_string(), t.to_string())).collect();
+        let asks = vec![("45285.2", "0.00100000"), ("45286.4", "1.54571953"), ("45286.6", "1.54571109"), ("45289.6", "1.54560911"), ("45290.2", "0.15890660"), ("45291.8", "1.54553491"), ("45294.7", "0.04454749"), ("45296.1", "0.35380000"), ("45297.5", "0.09945542"), ("45299.5", "0.18772827")]
+            .iter().map(|(s, t)| (s.to_string(), t.to_string())).collect();
         let checksum = 3310070434;
 
-        manager.update_book("TEST/USD".to_string(), bids, asks, Some(checksum));
+        manager.update_book("TEST/USD".to_string(), bids, asks, Some(checksum), true);
 
         let book = manager.books.get("TEST/USD").unwrap();
 

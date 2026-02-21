@@ -32,76 +32,10 @@ pub struct Config {
     pub ui_refresh_interval_ms: u64,
 }
 
-/// Order book snapshot for a single trading pair
-#[derive(Debug, Clone)]
-pub struct OrderBook {
-    #[allow(dead_code)]
-    pub symbol: String,
-    pub bids: Vec<PriceLevel>, // Sorted descending by price
-    pub asks: Vec<PriceLevel>, // Sorted ascending by price
-    pub timestamp: DateTime<Utc>,
-    pub checksum: Option<u32>, // Kraken provides checksums for validation
-}
-
-impl OrderBook {
-    pub fn best_bid(&self) -> Option<&PriceLevel> {
-        self.bids.first()
-    }
-
-    pub fn best_ask(&self) -> Option<&PriceLevel> {
-        self.asks.first()
-    }
-
-    pub fn build_side(
-        &self,
-        levels: Vec<(String, String)>,
-        descending: bool,
-    ) -> Vec<PriceLevel> {
-            let mut result: Vec<PriceLevel> = levels
-                .into_iter()
-                .filter_map(|(price, qty)| PriceLevel::new(price.to_string(), qty.to_string()))
-                .filter(|level| level.has_nonzero_quantity())
-                .collect();
-
-            if descending {
-                result.sort_by(|a, b| b.price.value.cmp(&a.price.value));
-            } else {
-                result.sort_by(|a, b| a.price.value.cmp(&b.price.value));
-            }
-
-            result.truncate(10);
-            result
-    }
-
-    pub fn spread_bps(&self) -> Option<u32> {
-        match (self.best_bid(), self.best_ask()) {
-            (Some(bid), Some(ask)) => {
-                let spread = (ask.price.value - bid.price.value) / bid.price.value;
-                let bps = spread * Decimal::from(10000);
-                bps.to_u32()
-            }
-            _ => None,
-        }
-    }
-
-    pub fn has_valid_checksum(&self) -> bool {
-        let asks_str: String = self.asks
-            .iter()
-            .map(|ask| format!("{}{}", format_value(&ask.price.raw), format_value(&ask.quantity.raw)))
-            .collect();
-        let bids_str: String = self.bids
-            .iter()
-            .map(|bid| format!("{}{}", format_value(&bid.price.raw), format_value(&bid.quantity.raw)))
-            .collect();
-        
-        let combined = format!("{}{}", asks_str, bids_str);
-
-        let checksum = crc32fast::hash(combined.as_bytes());
-
-        checksum == self.checksum.unwrap_or(0)
-        // crc32fast::hash(combined.as_bytes()) == self.checksum.unwrap_or(0)
-    }
-}
+// enum BookState {
+//     Uninitialized,
+//     Synced,
+// }
 
 #[derive(Debug, Clone)]
 pub struct CanonicalDecimal {
@@ -113,6 +47,131 @@ impl CanonicalDecimal {
     pub fn new(raw: String) -> Option<Self> {
         let value = Decimal::from_str_exact(&raw).ok()?;
         Some(Self { value, raw })
+    }
+}
+
+/// Order book snapshot for a single trading pair
+#[derive(Debug, Clone)]
+pub struct OrderBook {
+    #[allow(dead_code)]
+    pub symbol: String,
+    pub bids: BTreeMap<Decimal, PriceLevel>, // ascending by key, iterate in reverse for descending
+    pub asks: BTreeMap<Decimal, PriceLevel>, // ascending by key
+    pub timestamp: DateTime<Utc>,
+    pub checksum: Option<u32>, // Kraken provides checksums for validation
+}
+
+impl OrderBook {
+    pub fn new(symbol: String) -> Self {
+        Self {
+            symbol,
+            bids: BTreeMap::new(),
+            asks: BTreeMap::new(),
+            timestamp: Utc::now(),
+            checksum: None,
+        }
+    } 
+
+    pub fn best_bid(&self) -> Option<(&Decimal, &PriceLevel)> {
+        self.bids.iter().next_back() // highest bid
+    }
+
+    pub fn best_ask(&self) -> Option<(&Decimal, &PriceLevel)> {
+        self.asks.iter().next() // lowest ask
+    }
+    
+    pub fn spread_bps(&self) -> Option<u32> {
+        let (bid_price, _) = self.best_bid()?;
+        let (ask_price, _) = self.best_ask()?;
+        let spread = (ask_price - bid_price) / bid_price;
+        let bps = spread * Decimal::from(10000);
+        bps.to_u32()
+    }
+
+    pub fn load_snapshot(
+        &mut self,
+        bids: Vec<(String, String)>,
+        asks: Vec<(String, String)>,
+    ) {
+        self.bids.clear();
+        self.asks.clear();
+
+        for (price, qty) in bids {
+            self.apply_bid_delta(price, qty);
+        }
+
+        for (price, qty) in asks {
+            self.apply_ask_delta(price, qty);
+        }
+
+        self.truncate_to_depth();
+    }
+
+    pub fn apply_update(
+        &mut self,
+        bids: Vec<(String, String)>,
+        asks: Vec<(String, String)>,
+    ) {
+        for (price, qty) in bids {
+            self.apply_bid_delta(price, qty);
+        }
+        for (price, qty) in asks {
+            self.apply_ask_delta(price, qty);
+        }
+
+        self.truncate_to_depth();
+    }
+
+    pub fn apply_bid_delta(&mut self, price: String, qty: String) {
+        if let Some(level) = PriceLevel::new(price, qty) {
+            if level.has_nonzero_quantity() {
+                self.bids.insert(level.price.value, level);
+            } else {
+                self.bids.remove(&level.price.value);
+            }
+        }
+    }
+
+    pub fn apply_ask_delta(&mut self, price: String, qty: String) {
+        if let Some(level) = PriceLevel::new(price, qty) {
+            if level.has_nonzero_quantity() {
+                self.asks.insert(level.price.value, level);
+            } else {
+                self.asks.remove(&level.price.value);
+            }
+        }
+    }
+
+    pub fn truncate_to_depth(&mut self) {
+        let depth = 10; // magic number is fine here
+
+        // Bids: BTreeMap is ascending, so lowest bids are at the front — remove those (they're worst)
+        while self.bids.len() > depth {
+            let worst = *self.bids.keys().next().unwrap();
+            self.bids.remove(&worst);
+        }
+
+        // Asks: BTreeMap is ascending, so highest asks are at the back — remove those (they're worst)
+        while self.asks.len() > depth {
+            let worst = *self.asks.keys().next_back().unwrap();
+            self.asks.remove(&worst);
+        }
+    }
+
+    pub fn has_valid_checksum(&self) -> bool {
+        let asks_str: String = self.asks
+            .values()
+            .map(|level| format!("{}{}", format_value(&level.price.raw), format_value(&level.quantity.raw)))
+            .collect();
+
+        let bids_str: String = self.bids
+            .values()
+            .rev() // order in reverse because best bids are the highest
+            .map(|level| format!("{}{}", format_value(&level.price.raw), format_value(&level.quantity.raw)))
+            .collect();
+        
+        let combined = format!("{}{}", asks_str, bids_str);
+        crc32fast::hash(combined.as_bytes()) == self.checksum.unwrap_or(0)
     }
 }
 
@@ -130,7 +189,7 @@ impl PriceLevel {
         })
     }
 
-    fn has_nonzero_quantity(&self) -> bool {
+    pub fn has_nonzero_quantity(&self) -> bool {
         self.quantity.value > Decimal::ZERO
     }
 }

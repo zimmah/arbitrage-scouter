@@ -155,6 +155,8 @@ async fn handle_message(
 
     // Process order book data
     if let Some(data) = kraken_msg.data {
+        let is_snapshot = kraken_msg.msg_type.as_deref() == Some("snapshot");
+
         if message_number <= 10 {
             debug_log(&format!("[WebSocket] Processing {} order book updates", data.len()));
         }
@@ -167,7 +169,7 @@ async fn handle_message(
                 eprintln!("[WebSocket]   {} - {} bids, {} asks", book_data.symbol, bid_count, ask_count)
             }
 
-            update_orderbook(orderbook_manager, book_data).await;
+            update_orderbook(orderbook_manager, book_data, is_snapshot).await;
         }
 
         // Log stats after first few messages
@@ -185,25 +187,13 @@ async fn handle_message(
 async fn update_orderbook(
     orderbook_manager: &Arc<RwLock<OrderBookManager>>,
     book_data: BookData,
+    is_snapshot: bool,
 ) {
-    // Extract bids and asks
-    let bids: Vec<(String, String)> = book_data
-        .bids
-        .unwrap_or_default()
-        .into_iter()
-        .map(|level| (level.price, level.qty))
-        .collect();
+    let bids = book_data.bids.unwrap_or_default()
+        .into_iter().map(|l| (l.price, l.qty)).collect();
+    let asks = book_data.asks.unwrap_or_default()
+        .into_iter().map(|l| (l.price, l.qty)).collect();
 
-    let asks: Vec<(String, String)> = book_data
-        .asks
-        .unwrap_or_default()
-        .into_iter()
-        .map(|level| (level.price, level.qty))
-        .collect();
-
-    // Only update if we actually have data
-    if !bids.is_empty() || !asks.is_empty() {
-        let mut manager = orderbook_manager.write().await;
-        manager.update_book(book_data.symbol, bids, asks, book_data.checksum);
-    }
+    let mut manager = orderbook_manager.write().await;
+    manager.update_book(book_data.symbol, bids, asks, book_data.checksum, is_snapshot);
 }

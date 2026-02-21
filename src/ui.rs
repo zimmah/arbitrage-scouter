@@ -151,7 +151,7 @@ fn render_orderbooks(
         sorted_books.sort_by_key(|(symbol, _)| symbol.as_str());
 
         for (symbol, book) in sorted_books {
-            if let (Some(bid), Some(ask)) = (book.best_bid(), book.best_ask()) {
+            if let (Some((_, bid)), Some((_, ask))) = (book.best_bid(), book.best_ask()) {
                 let spread_bps = book.spread_bps().unwrap_or(0);
 
                 let line = Line::from(vec![
