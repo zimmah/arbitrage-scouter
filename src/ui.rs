@@ -157,9 +157,9 @@ fn render_orderbooks(
                 let line = Line::from(vec![
                     Span::styled(format!("{:12}", symbol), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
                     Span::raw("  Bid: "),
-                    Span::styled(format!("{:>12.4}", bid.price.value), Style::default().fg(Color::Green)), // need to rethink this style, for some pairs the decimal place doesn't make sense, but good enough for demo
+                    Span::styled(format!("{:>12}", bid.price.value), Style::default().fg(Color::Green)),
                     Span::raw("  Ask: "),
-                    Span::styled(format!("{:>12.4}", ask.price.value), Style::default().fg(Color::Red)),
+                    Span::styled(format!("{:>12}", ask.price.value), Style::default().fg(Color::Red)),
                     Span::raw("  Spread: "),
                     Span::styled(format!("{:>4} bps", spread_bps), Style::default().fg(Color::Yellow)),
                 ]);
