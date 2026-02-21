@@ -31,8 +31,9 @@ async fn main() -> Result<()> {
         "SOL/USD", "SOL/BTC",
     ];
 
+    let (manager, resync_rx) = OrderBookManager::new();
     // Shared state: order books and detected opportunities
-    let orderbook_manager = Arc::new(RwLock::new(OrderBookManager::new()));
+    let orderbook_manager = Arc::new(RwLock::new(manager));
     // todo: arbitrage detector
     // let arbitrage_detector = Arc etc
 
@@ -40,7 +41,7 @@ async fn main() -> Result<()> {
     let ws_handle = tokio::spawn({
         let orderbook_manager = Arc::clone(&orderbook_manager);
         async move {
-            run_websocket_client(symbols, orderbook_manager).await
+            run_websocket_client(symbols, orderbook_manager, resync_rx).await
         }
     });
 

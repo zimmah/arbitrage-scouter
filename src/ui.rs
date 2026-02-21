@@ -129,7 +129,7 @@ fn render_header(
 fn render_orderbooks(
     f: &mut ratatui::Frame,
     area: Rect,
-    books: &std::collections::HashMap<String, crate::types::OrderBook>,
+    books: &std::collections::HashMap<String, crate::orderbook::OrderBook>,
 ) {
     let mut items: Vec<ListItem> = Vec::new();
 

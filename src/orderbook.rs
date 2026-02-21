@@ -1,13 +1,11 @@
-use chrono::Utc;
-use std::collections::{HashMap};
-#[allow(unused_imports)]
+use chrono::{DateTime, Utc};
+use std::collections::{BTreeMap, HashMap};
 use rust_decimal::Decimal;
 #[allow(unused_imports)]
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
-#[allow(unused_imports)]
 
-use crate::types::{PriceLevel, OrderBook, Statistics};
-use crate::utils::debug_log;
+use crate::types::Statistics;
+use crate::utils::{format_value, debug_log};
 
 /// Manages all order books and ensures data accuracy by checksum
 /// 
@@ -19,15 +17,198 @@ pub struct OrderBookManager {
     books: HashMap<String, OrderBook>,
     stats: Statistics,
     start_time: chrono::DateTime<Utc>,
+    resync_tx: tokio::sync::mpsc::Sender<String>, // send symbol names that need resyncing
 }
 
-impl OrderBookManager {
-    pub fn new() -> Self {
+/// Order book snapshot for a single trading pair
+#[derive(Debug, Clone)]
+pub struct OrderBook {
+    #[allow(dead_code)]
+    pub symbol: String,
+    pub bids: BTreeMap<Decimal, PriceLevel>, // ascending by key, iterate in reverse for descending
+    pub asks: BTreeMap<Decimal, PriceLevel>, // ascending by key
+    pub timestamp: DateTime<Utc>,
+    pub checksum: Option<u32>, // Kraken provides checksums for validation
+}
+
+impl OrderBook {
+    pub fn new(symbol: String) -> Self {
         Self {
+            symbol,
+            bids: BTreeMap::new(),
+            asks: BTreeMap::new(),
+            timestamp: Utc::now(),
+            checksum: None,
+        }
+    } 
+
+    pub fn best_bid(&self) -> Option<(&Decimal, &PriceLevel)> {
+        self.bids.iter().next_back() // highest bid
+    }
+
+    pub fn best_ask(&self) -> Option<(&Decimal, &PriceLevel)> {
+        self.asks.iter().next() // lowest ask
+    }
+    
+    pub fn spread_bps(&self) -> Option<u32> {
+        let (bid_price, _) = self.best_bid()?;
+        let (ask_price, _) = self.best_ask()?;
+        let spread = (ask_price - bid_price) / bid_price;
+        let bps = spread * Decimal::from(10000);
+        bps.to_u32()
+    }
+
+    pub fn load_snapshot(
+        &mut self,
+        bids: Vec<(String, String)>,
+        asks: Vec<(String, String)>,
+    ) {
+        self.bids.clear();
+        self.asks.clear();
+
+        for (price, qty) in bids {
+            self.apply_bid_delta(price, qty);
+        }
+
+        for (price, qty) in asks {
+            self.apply_ask_delta(price, qty);
+        }
+
+        self.truncate_to_depth();
+    }
+
+    pub fn apply_update(
+        &mut self,
+        bids: Vec<(String, String)>,
+        asks: Vec<(String, String)>,
+    ) {
+        for (price, qty) in bids {
+            self.apply_bid_delta(price, qty);
+        }
+        for (price, qty) in asks {
+            self.apply_ask_delta(price, qty);
+        }
+
+        self.truncate_to_depth();
+    }
+
+    pub fn apply_bid_delta(&mut self, price: String, qty: String) {
+        if let Some(level) = PriceLevel::new(price, qty) {
+            if level.has_nonzero_quantity() {
+                self.bids.insert(level.price.value, level);
+            } else {
+                self.bids.remove(&level.price.value);
+            }
+        }
+    }
+
+    pub fn apply_ask_delta(&mut self, price: String, qty: String) {
+        if let Some(level) = PriceLevel::new(price, qty) {
+            if level.has_nonzero_quantity() {
+                self.asks.insert(level.price.value, level);
+            } else {
+                self.asks.remove(&level.price.value);
+            }
+        }
+    }
+
+    pub fn truncate_to_depth(&mut self) {
+        let depth = 10; // magic number is fine here
+
+        // Bids: BTreeMap is ascending, so lowest bids are at the front — remove those (they're worst)
+        while self.bids.len() > depth {
+            let worst = *self.bids.keys().next().unwrap();
+            self.bids.remove(&worst);
+        }
+
+        // Asks: BTreeMap is ascending, so highest asks are at the back — remove those (they're worst)
+        while self.asks.len() > depth {
+            let worst = *self.asks.keys().next_back().unwrap();
+            self.asks.remove(&worst);
+        }
+    }
+
+    pub fn has_valid_checksum(&self) -> bool {
+        let Some(expected) = self.checksum else {
+            return true; // no checksum to validate against yet
+        };
+
+        let asks_str: String = self.asks
+            .values()
+            .map(|level| format!("{}{}", format_value(&level.price.raw), format_value(&level.quantity.raw)))
+            .collect();
+
+        let bids_str: String = self.bids
+            .values()
+            .rev() // order in reverse because best bids are the highest
+            .map(|level| format!("{}{}", format_value(&level.price.raw), format_value(&level.quantity.raw)))
+            .collect();
+        
+        let combined = format!("{}{}", asks_str, bids_str);
+        let computed = crc32fast::hash(combined.as_bytes());
+    
+        if computed != expected {
+            debug_log(&format!("[checksum FAIL] symbol: {}", self.symbol));
+            debug_log(&format!("  asks_str: {}", asks_str));
+            debug_log(&format!("  bids_str: {}", bids_str));
+            debug_log(&format!("  combined: {}", combined));
+            debug_log(&format!("  computed: {} expected: {}", computed, expected));
+            // Log the raw price/qty values to spot formatting issues
+            for level in self.asks.values() {
+                debug_log(&format!("  ask raw: price='{}' qty='{}'", level.price.raw, level.quantity.raw));
+            }
+            for level in self.bids.values().rev() {
+                debug_log(&format!("  bid raw: price='{}' qty='{}'", level.price.raw, level.quantity.raw));
+            }
+        }
+
+        computed == expected
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CanonicalDecimal {
+    pub value: Decimal,
+    pub raw: String,
+}
+
+impl CanonicalDecimal {
+    pub fn from_raw(raw_json: &str) -> Option<Self> {
+        let value = Decimal::from_str_exact(raw_json).ok()?;
+        Some(Self { value, raw: raw_json.to_owned() })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PriceLevel {
+    pub price: CanonicalDecimal,
+    pub quantity: CanonicalDecimal,
+}
+
+impl PriceLevel {
+    pub fn new(price_str: String, quantity_str: String) -> Option<Self> {
+        Some(Self { 
+            price: CanonicalDecimal::from_raw(&price_str)?,
+            quantity: CanonicalDecimal::from_raw(&quantity_str)?,
+        })
+    }
+
+    pub fn has_nonzero_quantity(&self) -> bool {
+        self.quantity.value > Decimal::ZERO
+    }
+}
+
+
+impl OrderBookManager {
+    pub fn new() -> (Self, tokio::sync::mpsc::Receiver<String>) {
+        let (resync_tx, resync_rx) = tokio::sync::mpsc::channel(32);
+        let manager = Self {
             books: HashMap::new(),
             stats: Statistics::default(),
             start_time: Utc::now(),
-        }
+            resync_tx,
+        };
+        (manager, resync_rx)
     }
 
     pub fn all_checksums_valid(&self) -> bool {
@@ -58,7 +239,7 @@ impl OrderBookManager {
         // Scoped block so the mutable borrow of 'book' end before we use 'self' again
         let (bid_count, ask_count) = {
             // Get existing book or create new one
-            let book = self.books.entry(symbol.clone()).or_insert_with(|| OrderBook::new(symbol));
+            let book = self.books.entry(symbol.clone()).or_insert_with(|| OrderBook::new(symbol.clone()));
             
             if is_snapshot {
                 book.load_snapshot(bids, asks);
@@ -69,6 +250,14 @@ impl OrderBookManager {
             // Update timestamp and checksum
             book.timestamp = Utc::now();
             book.checksum = checksum.or(book.checksum);
+
+            let needs_resync = !book.has_valid_checksum();
+            if needs_resync {
+                book.bids.clear();
+                book.asks.clear();
+                book.checksum = None;
+                let _ = self.resync_tx.try_send(symbol);
+            }
 
             (book.bids.len(), book.asks.len())
         };
@@ -131,7 +320,7 @@ mod tests {
 
     #[test]
     fn test_orderbook_sorting() {
-        let mut manager = OrderBookManager::new();
+        let (mut manager, _resync_rx) = OrderBookManager::new();
 
         let bids = vec![("100.0", "1.0"), ("102.0", "2.0"), ("101.0", "1.5")].iter().map(|(s, t)| (s.to_string(), t.to_string())).collect();
         let asks = vec![("105.0", "1.0"), ("103.0", "2.0"), ("104.0", "1.5")].iter().map(|(s, t)| (s.to_string(), t.to_string())).collect();
@@ -155,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_checksum_verification() {
-        let mut manager = OrderBookManager::new();
+        let (mut manager, _resync_rx) = OrderBookManager::new();
 
         // The checksum example provided at https://docs.kraken.com/api/docs/guides/spot-ws-book-v2/ should correctly parse, otherwise the checksum detection is flawed
         let bids = vec![("45283.5", "0.10000000"), ("45283.4", "1.54582015"), ("45282.1", "0.10000000"), ("45281.0", "0.10000000"), ("45280.3", "1.54592586"), ("45279.0", "0.07990000"), ("45277.6", "0.03310103"), ("45277.5", "0.30000000"), ("45277.3", "1.54602737"), ("45276.6", "0.15445238")]

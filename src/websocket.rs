@@ -18,6 +18,7 @@ use crate::utils::debug_log;
 pub async fn run_websocket_client(
     symbols: Vec<&str>,
     orderbook_manager: Arc<RwLock<OrderBookManager>>,
+    mut resync_rx: tokio::sync::mpsc::Receiver<String>,
 ) -> Result<()> {
     let symbols: Vec<String> = symbols.iter().map(|s| s.to_string()).collect();
     let url = "wss://ws.kraken.com/v2";
@@ -32,7 +33,7 @@ pub async fn run_websocket_client(
     loop {
         let connected_at = tokio::time::Instant::now();
 
-        match connect_and_subscribe(url, &symbols, &orderbook_manager).await {
+        match connect_and_subscribe(url, &symbols, &orderbook_manager, &mut resync_rx).await {
             Ok(_) => {
                 debug_log(&format!("[WebSocket] Connection closed normally"));
             }
@@ -58,6 +59,7 @@ async fn connect_and_subscribe(
     url: &str,
     symbols: &[String],
     orderbook_manager: &Arc<RwLock<OrderBookManager>>,
+    resync_rx: &mut tokio::sync::mpsc::Receiver<String>,
 ) -> Result<()> {
     // Connect to WebSocket
     let (ws_stream, response) = connect_async(url)
@@ -85,27 +87,44 @@ async fn connect_and_subscribe(
     let mut message_count = 0;
 
     // Process incoming messages
-    while let Some(msg) = read.next().await {
-        let msg = msg?;
-
-        match msg {
-            Message::Text(text) => {
-                message_count += 1;
-                if message_count <= 3 {
-                    eprintln!("WebSocket Message #{}: {}", message_count, &text[..text.len().min(300)]);
+    loop {
+        tokio::select! {
+            msg = read.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        message_count += 1;
+                        if message_count <= 3 {
+                            eprintln!("WebSocket Message #{}: {}", message_count, &text[..text.len().min(300)]);
+                        }
+                        handle_message(&text, orderbook_manager, message_count).await?;
+                    }
+                    Some(Ok(Message::Ping(data))) => {
+                        write.send(Message::Pong(data)).await?;
+                    }
+                    Some(Ok(Message::Close(_))) => {
+                        debug_log("[WebSocket] Server closed connection");
+                        break;
+                    }
+                    Some(Err(e)) => return Err(e.into()),
+                    None => break,
+                    _ => {}
                 }
-                handle_message(&text, orderbook_manager, message_count).await?;
             }
-            Message::Ping(data) => {
-                write.send(Message::Pong(data)).await?;
+            Some(symbol) = resync_rx.recv() => {
+                debug_log(&format!("[WebSocket] Checksum invalid, resyncing {}", symbol));
+                let resub = serde_json::json!({
+                    "method": "subscribe",
+                    "params": {
+                        "channel": "book",
+                        "symbol": [symbol],
+                        "snapshot": true
+                    }
+                });
+                write.send(Message::Text(resub.to_string())).await?;
             }
-            Message::Close(_) => {
-                debug_log(&format!("[WebSocket] Server closed connection"));
-                break;
-            }
-            _ => {}
         }
     }
+
 
     Ok(())
 }
