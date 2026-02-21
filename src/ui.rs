@@ -152,7 +152,7 @@ fn render_orderbooks(
 
         for (symbol, book) in sorted_books {
             if let (Some((_, bid)), Some((_, ask))) = (book.best_bid(), book.best_ask()) {
-                let spread_bps = book.spread_bps().unwrap_or(0);
+                let spread_bps = book.spread_bps().unwrap_or(0.0);
 
                 let line = Line::from(vec![
                     Span::styled(format!("{:12}", symbol), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
@@ -161,7 +161,7 @@ fn render_orderbooks(
                     Span::raw("  Ask: "),
                     Span::styled(format!("{:>12}", ask.price.value), Style::default().fg(Color::Red)),
                     Span::raw("  Spread: "),
-                    Span::styled(format!("{:>4} bps", spread_bps), Style::default().fg(Color::Yellow)),
+                    Span::styled(format!("{:>4.2} bps", spread_bps), Style::default().fg(Color::Yellow)),
                 ]);
                 items.push(ListItem::new(line));
             }
@@ -187,7 +187,7 @@ fn render_opportunities(
     ))));
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Arbitrage Oppotunities"));
+        .block(Block::default().borders(Borders::ALL).title("Arbitrage Opportunities"));
     f.render_widget(list, area);
 }
 

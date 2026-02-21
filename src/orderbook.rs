@@ -50,12 +50,12 @@ impl OrderBook {
         self.asks.iter().next() // lowest ask
     }
     
-    pub fn spread_bps(&self) -> Option<u32> {
+    pub fn spread_bps(&self) -> Option<f32> {
         let (bid_price, _) = self.best_bid()?;
         let (ask_price, _) = self.best_ask()?;
         let spread = (ask_price - bid_price) / bid_price;
         let bps = spread * Decimal::from(10000);
-        bps.to_u32()
+        bps.to_f32()
     }
 
     pub fn load_snapshot(
