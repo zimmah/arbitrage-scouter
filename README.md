@@ -161,7 +161,7 @@ Each module has a single, clear responsibility. Dependencies flow downward (no c
 
 ```bash
 # Clone the repository
-git clone https://github.com/[USERNAME]/arbitrage-scouter
+git clone https://github.com/zimmah/arbitrage-scouter
 cd arbitrage-scouter
 
 # Build in release mode (optimized)
