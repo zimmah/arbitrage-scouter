@@ -141,7 +141,7 @@ This project demonstrates production-quality async Rust development through a li
 src/
 ├── main.rs         - Application entry point and task orchestration
 ├── types.rs        - Core data structures and configuration
-├── orderbook.rs    - Order book management and freshness filtering
+├── orderbook.rs    - Order book management and guaranteeing data accuracy
 ├── arbitrage.rs    - Triangular arbitrage detection logic
 ├── websocket.rs    - WebSocket client and reconnection logic
 └── ui.rs           - Terminal UI rendering with ratatui
