@@ -7,6 +7,7 @@ use rust_decimal::prelude::ToPrimitive;
 
 use crate::types::{ArbitrageOpportunity, Config, TradeAction, TradeStep};
 use crate::orderbook::OrderBook;
+use crate::utils::debug_log;
 
 #[derive(Clone)]
 pub struct TriangularPath {
@@ -58,6 +59,10 @@ impl ArbitrageDetector {
                     opportunities.push(opp);
                 }
             }
+        }
+
+        if !opportunities.is_empty() {
+            debug_log(&format!("{:?}", opportunities));
         }
 
         opportunities
@@ -260,6 +265,7 @@ mod tests {
             detection_interval_ms: 1000,
             ui_refresh_interval_ms: 250,
         };
+        let min_profit_bps = config.min_profit_bps;
         let detector = ArbitrageDetector::new(config);
         let mut books = HashMap::new();
 
@@ -282,7 +288,7 @@ mod tests {
 
         // Verify the profit is positive and above threshold
         let best = opportunities.iter().max_by_key(|o| o.profit_bps).unwrap();
-        assert!(best.profit_bps >= 10, "Expected profit >= 10 bps, got {}", best.profit_bps);
+        assert!(best.profit_bps >= min_profit_bps, "Expected profit >= {} bps, got {}", min_profit_bps, best.profit_bps);
 
         // Sanity check: verify all trade steps have sensible rates
         for step in &best.path {
