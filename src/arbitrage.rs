@@ -260,18 +260,70 @@ mod tests {
             detection_interval_ms: 1000,
             ui_refresh_interval_ms: 250,
         };
-
         let detector = ArbitrageDetector::new(config);
         let mut books = HashMap::new();
 
-        // Set up a profitable scenario
+        // All books have ask > bid
+        // The ETH/USD price is "too high" relative to BTC/USD * ETH/BTC,
+        // creating a genuine triangular arbitrage: USD → BTC → ETH → USD
+        //
+        // Forward (USD → BTC → ETH → USD):
+        //   1000 / 50100 = 0.01996007984 BTC
+        //   0.01996007984 / 0.06010 = 0.3321144732 ETH
+        //   0.3321144732 * 3050 = ~1012.95 USD  (profit)
         books.insert("BTC/USD".to_string(), create_test_book("BTC/USD", "50000.0", "50100.0"));
-        books.insert("ETH/BTC".to_string(), create_test_book("ETH/BTC", "0.06", "0.061"));
-        books.insert("ETH/USD".to_string(), create_test_book("ETH/USD", "3100.0", "3050.0"));
+        books.insert("ETH/BTC".to_string(), create_test_book("ETH/BTC", "0.06000", "0.06010"));
+        books.insert("ETH/USD".to_string(), create_test_book("ETH/USD", "3050.0", "3060.0"));
 
         let opportunities = detector.detect_triangular_arbitrage(&books);
-        
-        // Should find some opportunities
-        assert!(!opportunities.is_empty());
+
+        // Should find at least the forward path
+        assert!(!opportunities.is_empty(), "Expected a profitable forward path");
+
+        // Verify the profit is positive and above threshold
+        let best = opportunities.iter().max_by_key(|o| o.profit_bps).unwrap();
+        assert!(best.profit_bps >= 10, "Expected profit >= 10 bps, got {}", best.profit_bps);
+
+        // Sanity check: verify all trade steps have sensible rates
+        for step in &best.path {
+            assert!(step.rate > 0.0, "Trade step rate should be positive");
+            assert!(step.max_quantity > 0.0, "Trade step quantity should be positive");
+        }
+    }
+
+    #[test]
+    fn test_no_opportunity_when_prices_aligned() {
+        let config = Config {
+            min_profit_bps: 10,
+            detection_interval_ms: 1000,
+            ui_refresh_interval_ms: 250,
+        };
+        let detector = ArbitrageDetector::new(config);
+        let mut books = HashMap::new();
+
+        // Prices are internally consistent: ETH/USD mid (3000) == BTC/USD mid (50000) * ETH/BTC mid (0.06)
+        // Spreads on all three pairs ensure both forward and reverse paths are lossy:
+        //
+        // Forward (USD → BTC → ETH → USD):
+        //   1000 / 50100 = 0.01996007984 BTC
+        //   0.01996007984 / 0.06010 = 0.3321144732 ETH
+        //   0.3321144732 * 2990 = ~993.02 USD  (loss)
+        //
+        // Reverse (USD → ETH → BTC → USD):
+        //   1000 / 3010 = 0.3322259136 ETH
+        //   0.3322259136 * 0.06000 = 0.01993355482 BTC
+        //   0.01993355482 * 49900 = ~994.68 USD  (loss)
+        books.insert("BTC/USD".to_string(), create_test_book("BTC/USD", "49900.0", "50100.0"));
+        books.insert("ETH/BTC".to_string(), create_test_book("ETH/BTC", "0.06000", "0.06010"));
+        books.insert("ETH/USD".to_string(), create_test_book("ETH/USD", "2990.0", "3010.0"));
+
+        let opportunities = detector.detect_triangular_arbitrage(&books);
+
+        assert!(
+            opportunities.is_empty(),
+            "Expected no opportunities, but found {} with profit_bps: {:?}",
+            opportunities.len(),
+            opportunities.iter().map(|o| o.profit_bps).collect::<Vec<_>>()
+        );
     }
 }

@@ -189,7 +189,7 @@ fn render_opportunities(
         ))));
         
     } else {
-        for (i, opp) in opportunities.iter().enumerate().take(5) {
+        for (i, opp) in opportunities.iter().max_by_key(|o| o.profit_bps).iter().enumerate().take(5) {
             // Opportunity header
             let profit_pct = opp.profit_bps as f64 / 100.0;
             let header = Line::from(vec![
