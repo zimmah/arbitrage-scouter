@@ -113,7 +113,13 @@ impl ArbitrageDetector {
 
         // Calculate profit
         let profit = final_quote - initial_quote;
-        let profit_bps = ((profit / initial_quote) * Decimal::from(10000)).to_u32()?;
+        let profit_bps = ((profit / initial_quote) * Decimal::from(10000)).to_i32()?;
+
+        if profit_bps < self.config.min_profit_bps as i32 {
+            return None;
+        }
+
+        let profit_bps = profit_bps as u32;
 
         let steps = vec![
             TradeStep {

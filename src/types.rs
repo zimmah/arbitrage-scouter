@@ -135,6 +135,10 @@ pub struct BookData {
 
 #[derive(Deserialize, Debug)]
 pub struct BookLevel {
+    // RawValue preserves exact numeric precision without floating point rounding.
+    // Kraken's v2 WebSocket API sends prices as unquoted JSON numbers per the spec https://docs.kraken.com/api/docs/guides/spot-ws-intro/.
+    // .get() returns the raw JSON text (e.g. "45283.5"), which we parse directly
+    // into Decimal via CanonicalDecimal::from_raw().
     pub price:  Box<RawValue>,
     pub qty: Box<RawValue>,
 }

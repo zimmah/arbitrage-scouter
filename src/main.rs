@@ -75,6 +75,11 @@ async fn main() -> Result<()> {
                 // Detect opportunities
                 let opportunities = arbitrage_detector.detect_triangular_arbitrage(&books);
 
+                if !opportunities.is_empty() {
+                    let best_bps = opportunities.iter().map(|o| o.profit_bps).max().unwrap_or(0);
+                    let mut manager = orderbook_manager.write().await;
+                    manager.record_opportunities(opportunities.len(), best_bps);
+                }
                 // update detector's stored opportunities
                 arbitrage_detector.update_opportunities(opportunities).await;
             }

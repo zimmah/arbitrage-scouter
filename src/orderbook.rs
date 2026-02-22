@@ -6,6 +6,8 @@ use rust_decimal::prelude::ToPrimitive;
 use crate::types::{PriceLevel, Statistics};
 use crate::utils::{format_value, debug_log};
 
+const ORDER_BOOK_DEPTH: usize = 10;
+
 /// Manages all order books and ensures data accuracy by checksum
 /// 
 /// Design decision: We keep the full order book (up to 10 levels deep)
@@ -111,7 +113,7 @@ impl OrderBook {
     }
 
     pub fn truncate_to_depth(&mut self) {
-        let depth = 10; // magic number is fine here
+        let depth = ORDER_BOOK_DEPTH;
 
         // Bids: BTreeMap is ascending, so lowest bids are at the front — remove those (they're worst)
         while self.bids.len() > depth {
@@ -228,7 +230,6 @@ impl OrderBookManager {
         };
 
         self.stats.total_orderbook_updates += 1;
-        self.stats.all_checksums_valid = self.all_checksums_valid();
 
         if count < 10 {
             debug_log(&format!("  -> Stored. Total books: {}, This book has {} bids, {} asks",
@@ -270,12 +271,22 @@ impl OrderBookManager {
         stats.uptime_seconds = Utc::now()
             .signed_duration_since(self.start_time)
             .num_seconds() as u64;
+        stats.all_checksums_valid = self.all_checksums_valid();
+
         stats
+    }
+
+    /// Record arbitrage opportunities so they can be displayed in the UI
+    pub fn record_opportunities(&mut self, count: usize, best_bps: u32) {
+        self.stats.total_opportunities_found += count as u64;
+        if best_bps > self.stats.best_opportunity_bps {
+            self.stats.best_opportunity_bps = best_bps;
+        }
     }
 
     /// Get number of active order books
     pub fn active_book_count(&self) -> usize {
-        self.get_books().len()
+        self.books.len()
     }
 }
 
