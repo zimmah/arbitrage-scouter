@@ -1,9 +1,10 @@
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
+use chrono::{DateTime, Utc};
 
 /// Application configuration
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Config {
     /// Minimum profit in basis points (1 bp = 0.01%)
     pub min_profit_bps: u32,
@@ -13,21 +14,15 @@ pub struct Config {
     pub ui_refresh_interval_ms: u64,
 }
 
-// enum BookState {
-//     Uninitialized,
-//     Synced,
-// }
-
-
-
-// /// A detected arbitrage opportunity
-// #[derive(Debug, Clone)]
-// pub struct ArbitrageOpportunity {
-//     pub path: Vec<TradeStep>,
-//     pub max_executable_usd: f64, // Maximum amount that can be traded
-//     pub profit_bps: u32,         // Profit in basis points
-//     pub timestamp: DateTime<Utc>,
-// }
+/// A detected arbitrage opportunity
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ArbitrageOpportunity {
+    pub path: Vec<TradeStep>,
+    pub max_executable_usd: f64, // Maximum amount that can be traded
+    pub profit_bps: u32,         // Profit in basis points
+    pub timestamp: DateTime<Utc>,
+}
 
 // impl ArbitrageOpportunity {
 //     /// Calculate the absolute profit in USD for a given input amount
@@ -36,28 +31,61 @@ pub struct Config {
 //     }
 // }
 
-// #[derive(Debug, Clone)]
-// pub struct TradeStep {
-//     pub action: TradeAction,
-//     pub symbol: String,
-//     pub rate: f64,
-//     pub max_quantity: f64, // Maximum amount tradeable at this step
-// }
+#[derive(Debug, Clone)]
+pub struct PriceLevel {
+    pub price: CanonicalDecimal,
+    pub quantity: CanonicalDecimal,
+}
 
-// #[derive(Debug, Clone, PartialEq)]
-// pub enum TradeAction {
-//     Buy,
-//     Sell,
-// }
+impl PriceLevel {
+    pub fn new(price_str: String, quantity_str: String) -> Option<Self> {
+        Some(Self { 
+            price: CanonicalDecimal::from_raw(&price_str)?,
+            quantity: CanonicalDecimal::from_raw(&quantity_str)?,
+        })
+    }
 
-// impl std::fmt::Display for TradeAction {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             TradeAction::Buy => write!(f, "BUY "),
-//             TradeAction::Sell => write!(f, "SELL "),
-//         }
-//     }
-// }
+    pub fn has_nonzero_quantity(&self) -> bool {
+        self.quantity.value > Decimal::ZERO
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CanonicalDecimal {
+    pub value: Decimal,
+    pub raw: String,
+}
+
+impl CanonicalDecimal {
+    pub fn from_raw(raw_json: &str) -> Option<Self> {
+        let value = Decimal::from_str_exact(raw_json).ok()?;
+        Some(Self { value, raw: raw_json.to_owned() })
+    }
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct TradeStep {
+    pub action: TradeAction,
+    pub symbol: String,
+    pub rate: f64,
+    pub max_quantity: f64, // Maximum amount tradeable at this step
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TradeAction {
+    Buy,
+    Sell,
+}
+
+impl std::fmt::Display for TradeAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TradeAction::Buy => write!(f, "BUY "),
+            TradeAction::Sell => write!(f, "SELL "),
+        }
+    }
+}
 
 /// Statistics for the application
 #[derive(Debug, Clone, Default)]
@@ -87,7 +115,7 @@ pub struct SubscribeParams {
 }
 
 #[derive(Deserialize, Debug)]
-#[allow(dead_code)]
+#[allow(dead_code)] // channel isn't currently used, but it's good to know it exists
 pub struct KrakenMessage {
     #[serde(rename = "type")]
     pub msg_type: Option<String>,
@@ -96,7 +124,7 @@ pub struct KrakenMessage {
 }
 
 #[derive(Deserialize, Debug)]
-#[allow(dead_code)]
+#[allow(dead_code)] // timestamp isn't currently used, but it's good to know it's there
 pub struct BookData {
     pub symbol: String,
     pub bids: Option<Vec<BookLevel>>,

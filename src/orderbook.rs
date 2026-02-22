@@ -1,10 +1,9 @@
 use chrono::{DateTime, Utc};
 use std::collections::{BTreeMap, HashMap};
 use rust_decimal::Decimal;
-#[allow(unused_imports)]
-use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
+use rust_decimal::prelude::ToPrimitive;
 
-use crate::types::Statistics;
+use crate::types::{PriceLevel, Statistics};
 use crate::utils::{format_value, debug_log};
 
 /// Manages all order books and ensures data accuracy by checksum
@@ -23,7 +22,6 @@ pub struct OrderBookManager {
 /// Order book snapshot for a single trading pair
 #[derive(Debug, Clone)]
 pub struct OrderBook {
-    #[allow(dead_code)]
     pub symbol: String,
     pub bids: BTreeMap<Decimal, PriceLevel>, // ascending by key, iterate in reverse for descending
     pub asks: BTreeMap<Decimal, PriceLevel>, // ascending by key
@@ -165,39 +163,6 @@ impl OrderBook {
         computed == expected
     }
 }
-
-#[derive(Debug, Clone)]
-pub struct CanonicalDecimal {
-    pub value: Decimal,
-    pub raw: String,
-}
-
-impl CanonicalDecimal {
-    pub fn from_raw(raw_json: &str) -> Option<Self> {
-        let value = Decimal::from_str_exact(raw_json).ok()?;
-        Some(Self { value, raw: raw_json.to_owned() })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PriceLevel {
-    pub price: CanonicalDecimal,
-    pub quantity: CanonicalDecimal,
-}
-
-impl PriceLevel {
-    pub fn new(price_str: String, quantity_str: String) -> Option<Self> {
-        Some(Self { 
-            price: CanonicalDecimal::from_raw(&price_str)?,
-            quantity: CanonicalDecimal::from_raw(&quantity_str)?,
-        })
-    }
-
-    pub fn has_nonzero_quantity(&self) -> bool {
-        self.quantity.value > Decimal::ZERO
-    }
-}
-
 
 impl OrderBookManager {
     pub fn new() -> (Self, tokio::sync::mpsc::Receiver<String>) {

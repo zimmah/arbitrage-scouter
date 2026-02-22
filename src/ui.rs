@@ -17,13 +17,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-// use crate::arbitrage::ArbitrageDetector; todo
-use crate::orderbook::OrderBookManager;
+use crate::orderbook::{OrderBookManager, OrderBook};
+use crate::arbitrage::ArbitrageDetector;
+use crate::types::{Statistics, ArbitrageOpportunity};
 
 // run the terminal UI
 pub async fn run_tui(
     orderbook_manager: Arc<RwLock<OrderBookManager>>,
-    // arbitrage_detector: Arc<ArbitrageDetector>,
+    arbitrage_detector: Arc<ArbitrageDetector>,
     ui_refresh_interval_ms: u64,
 ) -> Result<()> {
     // Setup terminal
@@ -37,7 +38,7 @@ pub async fn run_tui(
     terminal.clear()?;
 
     // Run the UI loop
-    let result = run_ui_loop(&mut terminal, orderbook_manager, /* arbitrage_detector, */ ui_refresh_interval_ms).await;
+    let result = run_ui_loop(&mut terminal, orderbook_manager, arbitrage_detector, ui_refresh_interval_ms).await;
 
     // Restore terminal
     disable_raw_mode()?;
@@ -54,16 +55,16 @@ pub async fn run_tui(
 async fn run_ui_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     orderbook_manager: Arc<RwLock<OrderBookManager>>,
-    // arbitrage_detector: Arc<ArbitrageDetector>,
+    arbitrage_detector: Arc<ArbitrageDetector>,
     ui_refresh_interval_ms: u64,
 ) -> Result<()> {
     loop {
         // Get current data
-        let (books, stats) = {
+        let (books, stats, book_count) = {
             let manager = orderbook_manager.read().await;
-            (manager.get_books(), manager.get_stats())
+            (manager.get_books(), manager.get_stats(), manager.active_book_count())
         };
-        // let opportunities = arbitrage_detector.get_opportunities().await;
+        let opportunities = arbitrage_detector.get_opportunities().await;
 
         // Render UI
         terminal.draw(|f| {
@@ -71,7 +72,7 @@ async fn run_ui_loop(
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Length(3), // Header
-                    Constraint::Min(10), // Order Books
+                    Constraint::Length(book_count as u16 + 2), // Order Books
                     Constraint::Min(15), // Opportunities
                     Constraint::Length(6), // Stats
                 ])
@@ -84,7 +85,7 @@ async fn run_ui_loop(
             render_orderbooks(f, chunks[1], &books);
 
             // Opportunities
-            render_opportunities(f, chunks[2], /* &opportunities */); // render placeholder for now
+            render_opportunities(f, chunks[2], &opportunities); 
 
             // Statistics
             render_stats(f, chunks[3], &stats);
@@ -110,7 +111,7 @@ async fn run_ui_loop(
 fn render_header(
     f: &mut ratatui::Frame,
     area: Rect,
-    stats: &crate::types::Statistics,
+    stats: &Statistics,
 ) {
     let uptime_str = format_uptime(stats.uptime_seconds);
     let text = vec![Line::from(vec![
@@ -129,7 +130,7 @@ fn render_header(
 fn render_orderbooks(
     f: &mut ratatui::Frame,
     area: Rect,
-    books: &std::collections::HashMap<String, crate::orderbook::OrderBook>,
+    books: &std::collections::HashMap<String, OrderBook>,
 ) {
     let mut items: Vec<ListItem> = Vec::new();
 
@@ -177,14 +178,45 @@ fn render_orderbooks(
 fn render_opportunities(
     f: &mut ratatui::Frame,
     area: Rect,
-    // opportunities: &[crate::types::ArbitrageOpportunity],
+    opportunities: &[ArbitrageOpportunity],
 ) {
     let mut items: Vec<ListItem> = Vec::new();
 
-    items.push(ListItem::new(Line::from(Span::styled(
-        "No arbitrage opportunities detected",
-        Style::default().fg(Color::DarkGray),
-    ))));
+    if opportunities.is_empty() {    
+        items.push(ListItem::new(Line::from(Span::styled(
+            "No arbitrage opportunities detected",
+            Style::default().fg(Color::DarkGray),
+        ))));
+        
+    } else {
+        for (i, opp) in opportunities.iter().enumerate().take(5) {
+            // Opportunity header
+            let profit_pct = opp.profit_bps as f64 / 100.0;
+            let header = Line::from(vec![
+                Span::styled(format!("#{} ", i + 1), Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    format!("Profit: {:.2}%", profit_pct),
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(format!("  Max: ${:.2}", opp.max_executable_usd)),
+            ]);
+            items.push(ListItem::new(header));
+
+            // Trade path
+            for step in &opp.path {
+                let line = Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(format!("{}", step.action), Style::default().fg(Color::Yellow)),
+                    Span::raw(" "),
+                    Span::styled(format!("{:10}", step.symbol), Style::default().fg(Color::White)),
+                    Span::raw(format!(" @ {:.8}", step.rate)),
+                ]);
+                items.push(ListItem::new(line));
+            }
+
+            items.push(ListItem::new(Line::from(""))); // Spacer
+        }
+    }
 
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title("Arbitrage Opportunities"));
@@ -194,7 +226,7 @@ fn render_opportunities(
 fn render_stats(
     f: &mut ratatui::Frame,
     area: Rect,
-    stats: &crate::types::Statistics,
+    stats: &Statistics,
 ) {
     let checksum_color = if stats.all_checksums_valid { Color::Green } else { Color::Red };
     let checksum_text = if stats.all_checksums_valid { "✅ All valid" } else { "❌ Invalid" };
