@@ -161,7 +161,7 @@ fn render_orderbooks(
                     Span::raw("  Ask: "),
                     Span::styled(format!("{:>12}", ask.price.value), Style::default().fg(Color::Red)),
                     Span::raw("  Spread: "),
-                    Span::styled(format!("{:>4.2} bps", spread_bps), Style::default().fg(Color::Yellow)),
+                    Span::styled(format!("{:>5.2} bps", spread_bps), Style::default().fg(Color::Yellow)),
                 ]);
                 items.push(ListItem::new(line));
             }
