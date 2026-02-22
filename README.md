@@ -299,7 +299,7 @@ cargo test orderbook::tests
 
 Tests cover:
 - Order book sorting (bids descending, asks ascending)
-- Depth calculations
+- Checksum accuracy
 - Profitable path detection
 
 ## Performance Considerations
