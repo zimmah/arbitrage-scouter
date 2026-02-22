@@ -161,8 +161,8 @@ Each module has a single, clear responsibility. Dependencies flow downward (no c
 
 ```bash
 # Clone the repository
-git clone https://github.com/[USERNAME]/kraken-arbitrage-scouter
-cd kraken-arbitrage-scouter
+git clone https://github.com/[USERNAME]/arbitrage-scouter
+cd arbitrage-scouter
 
 # Build in release mode (optimized)
 cargo build --release
