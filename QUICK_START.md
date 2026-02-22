@@ -17,8 +17,8 @@ Get the Kraken Arbitrage Scout running in under 5 minutes.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/kraken-arbitrage-scout.git
-cd kraken-arbitrage-scout
+git clone https://github.com/zimmah/arbitrage-scouter.git
+cd arbitrage-scouter
 
 # Build in release mode (optimized)
 cargo build --release
