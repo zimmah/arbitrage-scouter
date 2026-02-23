@@ -207,6 +207,8 @@ A width of at least 80 characters is recommended
 | Valid Checksums: ✅ All valid                                          |
 └────────────────────────────────────────────────────────────────────────┘
 ```
+<img width="657" height="710" alt="image" src="https://github.com/user-attachments/assets/47906179-f944-436a-badc-de7de281dbb5" />
+
 
 ## Arbitrage Detection Logic
 
