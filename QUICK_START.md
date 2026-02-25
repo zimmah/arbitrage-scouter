@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get the Kraken Arbitrage Scout running in under 5 minutes.
+Get the Kraken Arbitrage Scouter running in under 5 minutes.
 
 ## Prerequisites
 
@@ -8,10 +8,9 @@ Get the Kraken Arbitrage Scout running in under 5 minutes.
   ```bash
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   ```
+- **Internet connection**: Required for the WebSocket connection to Kraken
 
-- **Internet connection**: Needed for WebSocket connection to Kraken
-
-**Note**: No OpenSSL required! This project uses `rustls` (pure Rust TLS).
+> **Note**: No OpenSSL required! This project uses `rustls` (pure-Rust TLS).
 
 ## Installation
 
@@ -20,7 +19,7 @@ Get the Kraken Arbitrage Scout running in under 5 minutes.
 git clone https://github.com/zimmah/arbitrage-scouter.git
 cd arbitrage-scouter
 
-# Build in release mode (optimized)
+# Build in release mode (recommended)
 cargo build --release
 
 # Run the application
@@ -29,18 +28,19 @@ cargo run --release
 
 ## What You'll See
 
-The terminal UI will display:
+The terminal UI displays four panels:
 
-1. **Header**: Uptime and controls
+1. **Header**: Uptime and keyboard controls
 2. **Order Books**: Live bid/ask prices from Kraken
-3. **Arbitrage Opportunities**: Detected profitable paths (if any)
-4. **Statistics**: Updates, opportunities found, best profit
+3. **Arbitrage Opportunities**: Detected profitable paths, if any exist
+4. **Statistics**: Update count, opportunities found, best profit seen, and checksum integrity.
 
 ## Controls
 
-- **`q`** or **`Q`**: Quit
-- **`Esc`**: Quit  
-- **`Ctrl+C`**: Force quit
+| Key | Action |
+|---|---|
+| `q` / `Q` / `Esc` | Quit gracefully |
+| `Ctrl+C` | Force quit |
 
 ## Understanding the Output
 
@@ -50,9 +50,9 @@ The terminal UI will display:
 BTC/USD       Bid:    47234.5000  Ask:    47241.3000  Spread:   14 bps
 ```
 
-- **Bid**: Highest price someone will pay
-- **Ask**: Lowest price someone will sell
-- **Spread**: Difference (in basis points, 1 bps = 0.01%)
+- **Bid**: Highest price a buyer is willing to pay
+- **Ask**: Lowest price a seller is willing to accept
+- **Spread**: Difference between ask and bid, expressed in basis points (1 bps = 0.01%)
 
 ### Arbitrage Opportunities
 
@@ -63,67 +63,60 @@ BTC/USD       Bid:    47234.5000  Ask:    47241.3000  Spread:   14 bps
    SELL ETH/USD     @ 2461.50000000
 ```
 
-- **Profit**: Percentage gain
-- **Max**: Maximum amount tradeable (based on order book depth)
-- **Path**: Sequence of trades to exploit the opportunity
+- **Profit**: Expected percentage gain across the full trade path
+- **Max**: Maximum tradeable amount, calculated from live order book depth
+- **Path**: The sequence of trades required to realise the opportunity
 
-### Why You Might Not See Opportunities
+### Why No Opportunities May Appear
 
-Real arbitrage is rare because:
-1. **HFT bots** exploit them instantly
-2. **Transaction fees** eat into profits (not shown in this demo)
-3. **Low volatility** periods
+Real arbitrage is rare. This is expected behaviour, not a bug. Common reasons include:
 
-This is normal and expected!
+- HFT systems exploit openings near-instantly
+- Transaction fees absorb marginal opportunities (fees are not modelled in this demo)
+- Extended low-volatility periods reduce price divergence
 
 ## Configuration
 
-Edit `main.rs` to adjust:
+To adjust detection parameters, edit the `Config` struct in `main.rs`:
 
 ```rust
 let config = Config {
-    min_profit_bps: 10,          // Minimum profit to report (0.10%)
-    detection_interval_ms: 1000, // How often to check (1 second)
+    min_profit_bps: 10,          // Minimum profit threshold to report (0.10%)
+    detection_interval_ms: 1000, // How often to run detection (milliseconds)
     ui_refresh_interval_ms: 250, // UI refresh rate (250ms = 4 FPS)
 };
 ```
 
+Lowering `min_profit_bps` will surface more marginal opportunities for inspection.
+
 ## Troubleshooting
 
-### Terminal looks weird
-- Make sure your terminal is at least 80x24 characters
-- Try a different terminal (iTerm2, Windows Terminal, etc.)
+**The terminal UI is not rendering correctly.**  
+Ensure your terminal is at least 80×24 characters. If the issue persists, try a different terminal emulator (iTerm2, Windows Terminal, Alacritty, etc.).
 
-### Connection errors
-- Check your internet connection
-- Kraken might be down (rare)
-- The app will auto-reconnect every 5 seconds
+**Connection errors on startup.**  
+Check your internet connection. The application will automatically attempt to reconnect every 5 seconds with exponential backoff.
 
-### No opportunities showing
-- This is normal! See "[Why You Might Not See Opportunities](#why-you-might-not-see-opportunities)" above
-- Try lowering `min_profit_bps` to see more marginal opportunities
+**No opportunities are appearing.**  
+This is normal — see [Why No Opportunities May Appear](#why-no-opportunities-may-appear) above. You can also lower `min_profit_bps` to see more marginal cases.
 
-### Build errors
+**Build errors.**  
 ```bash
-# Update Rust
+# Update Rust to the latest stable version
 rustup update
 
-# Clean and rebuild
+# Clean the build cache and rebuild
 cargo clean
 cargo build --release
 ```
 
 ## Next Steps
 
-- Read [README.md](README.md) for full documentation
-- Read [DESIGN.md](DESIGN.md) to understand the architecture
-- Explore the code in `src/`
-- Run tests: `cargo test`
-
-## Questions?
-
-Open an issue on GitHub or check the documentation in the README.
+- [README.md](README.md) — Full project documentation
+- [DESIGN.md](DESIGN.md) — Architecture and technical decisions
+- `src/` — Source code
+- `cargo test` — Run the test suite
 
 ---
 
-**Remember**: This is for educational purposes only. Do not use for actual trading!
+> ⚠️ **Educational Use Only**: This project is for learning and demonstration purposes. Do not use it for actual trading.

@@ -1,8 +1,9 @@
 # Design Document
 
-This document explains the technical decisions, tradeoffs, and async patterns used in this project.
+This document covers the technical decisions, architectural tradeoffs, and async patterns used in this project.
 
 ## Table of Contents
+
 1. [Architecture Overview](#architecture-overview)
 2. [Data Flow](#data-flow)
 3. [Performance Considerations](#performance-considerations)
@@ -10,142 +11,130 @@ This document explains the technical decisions, tradeoffs, and async patterns us
 5. [UI Design](#ui-design)
 6. [Testing Strategy](#testing-strategy)
 
+---
 
 ## Architecture Overview
 
 ### Module Responsibilities
 
 ```
-main.rs          - Orchestrates tasks, owns shared state
-types.rs         - Data structures, no logic
+main.rs          - Task orchestration and shared state ownership
+types.rs         - Data structures; no business logic
 orderbook.rs     - Order book state management
 arbitrage.rs     - Detection algorithms
 websocket.rs     - Network I/O and protocol handling
-ui.rs            - Terminal rendering and input
+ui.rs            - Terminal rendering and user input
 ```
 
-**Principle**: Each module has one clear responsibility. No circular dependencies.
+**Principle**: Each module has a single, clear responsibility. There are no circular dependencies.
 
 ### Why This Structure?
 
-- **Testability**: Pure functions in `arbitrage.rs` can be tested without I/O
-- **Clarity**: New contributors can understand each module independently
-- **Maintainability**: Changes to UI don't affect arbitrage logic
-- **Reusability**: `arbitrage.rs` could be reused in a different UI
+- **Testability**: Pure functions in `arbitrage.rs` and `orderbook.rs` can be unit tested without any I/O
+- **Clarity**: Each module can be understood in isolation
+- **Maintainability**: UI changes do not affect arbitrage logic, and vice versa
+- **Reusability**: `arbitrage.rs` and `orderbook.rs` could be reused with an entirely different frontend
+
+---
 
 ## Data Flow
 
 ### WebSocket → OrderBook → Arbitrage → UI
 
 ```
-1. Kraken WebSocket sends order book update
+1. Kraken WebSocket sends an order book update
    ↓
-2. websocket.rs parses JSON
+2. websocket.rs parses the JSON payload
    ↓
-3. OrderBookManager.update_book() (write lock)
+3. OrderBookManager.update_book() acquires a write lock
    ↓
-4. Detector reads books every 1s (read lock)
+4. ArbitrageDetector reads all books every 1s (read lock)
    ↓
-5. Detector calculates opportunities
+5. ArbitrageDetector calculates opportunities
    ↓
-6. Detector updates own state (write lock)
+6. ArbitrageDetector updates its stored results (write lock)
    ↓
-7. UI reads both books and opportunities (read locks)
+7. UI reads books and opportunities (read locks)
    ↓
-8. UI renders to terminal
+8. UI renders to the terminal
 ```
 
-**Decoupling**: UI never talks to WebSocket directly. Each component only knows about immediate dependencies.
+**Key design principle**: The UI never communicates with the WebSocket client directly. Each component depends only on its immediate downstream.
+
+---
 
 ## Performance Considerations
 
 ### Memory Usage
 
-**Order Books**: 
-- 8 pairs × 2 sides × 10 levels × ~32 bytes ≈ 5 KB
-- Negligible
+| Component | Estimate |
+|---|---|
+| Order books (8 pairs × 2 sides × 10 levels × ~32 bytes) | ~5 KB |
+| Opportunities (Vec, typically < 10 items × ~200 bytes) | < 2 KB |
+| Total (including Tokio runtime) | < 10 MB |
 
-**Opportunities**:
-- Stored in Vec, typically < 10 items
-- Each opportunity ~200 bytes
-- Negligible
-
-**Total**: < 10 MB including Tokio runtime
+Memory usage is negligible for this application.
 
 ### CPU Usage
 
-**Bottleneck**: Arbitrage detection (runs every 1s)
-- Checks ~8 triangular paths
-- Each path: ~10 floating point operations
-- Total: ~80 FLOPs per second
-- Result: < 1% CPU on modern hardware
+The arbitrage detector is the primary computational component. It runs every second, checks approximately 8 triangular paths, and performs roughly 10 floating-point operations per path — around 80 FLOPs per second in total. In practice this consumes less than 1% CPU on modern hardware.
 
-**Optimization Opportunity**: Could parallelize path checking with `rayon`, but unnecessary here.
+If parallelism were needed, path checking could be distributed across threads using `rayon`. This is unnecessary at the current scale.
 
 ### Network
 
-**Bandwidth**: ~1-5 KB/s from WebSocket (compressed JSON)
-
-**Latency**: Not critical (we're not executing trades)
+WebSocket traffic from Kraken is approximately 1–5 KB/s of compressed JSON. Latency is not a concern since this system does not execute trades.
 
 ### Lock Contention
 
-**Read Locks**: Never contend (multiple readers allowed)
+`RwLock` is used throughout to optimise for the read-heavy access pattern:
 
-**Write Locks**: 
-- WebSocket: ~10-100 updates/second
-- Detector: 1 update/second
-- Total write lock time: < 0.1% of time
+- **Read locks** never contend with each other (multiple concurrent readers are permitted)
+- **Write locks** are acquired infrequently: the WebSocket client writes on each update (typically ~277 times/second), and the detector writes once per second
 
-**Result**: Lock contention is not a bottleneck
+Total write lock hold time is well under 0.1% — lock contention is not a bottleneck.
+
+---
 
 ## Depth Calculation Design
 
 ### The Problem
 
-Original code used a magic constant:
+A naive implementation uses a fixed notional amount:
 
 ```rust
-let initial_amount = 1000.0; // BAD: Arbitrary magic number
+let initial_amount = 1000.0; // Arbitrary constant "magic number"
 ```
 
-**Issues**:
-1. If depth is $100, profit calculation is wrong
-2. If depth is $10,000, we underestimate opportunity
-3. Doesn't reflect real trading constraints
+This is problematic because the result depends entirely on the chosen constant. If available liquidity is $100, the profit calculation is overstated. If liquidity is $10,000, the opportunity is understated.
 
 ### The Solution
 
-Calculate max executable based on order book depth:
+The system instead calculates the maximum executable amount by working backward through the trade path:
 
 ```rust
-// Work backwards from the final step
-let max_eth_sell = bid3.quantity;
-let max_btc_for_step2 = max_eth_sell * ask2.price;
-let max_executable_usd = /* minimum of all constraints */;
+// Work backwards from the final step to find the liquidity bottleneck
+let max_quote_sell = bid3.quantity;
+let max_intermediate_for_step2 = max_quote_sell * ask2.price;
+let max_executable_usd = /* minimum constraint across all steps */;
 ```
 
-**Why This Works**:
-1. Respects liquidity at each step
-2. Finds the bottleneck
-3. Realistic maximum profit calculation
+This approach respects actual liquidity at each step, identifies the binding constraint, and produces a realistic upper bound on profit. The tradeoff is added code complexity, which is justified by the accuracy improvement.
 
-**Tradeoff**: More complex code, but significantly more accurate.
+---
 
 ## UI Design
 
 ### Why Ratatui?
 
-Using `println!` is simple, but the output is messy and hard to read, as the text will keep moving constantly, a TUI is much more pleasant to read.
+Simple `println!` output scrolls continuously and is difficult to read for live data. A TUI provides a stable, structured view that updates in place.
 
+`ratatui` was chosen for the following reasons:
 
-**Choice**: `ratatui`
-- Industry standard for Rust TUIs
-- Lightweight
-- Good documentation
-- Active maintenance
-
-Alternatives like `cursive` exist, but `ratatui` is just a great name and it works, so why not.
+- It is the de facto standard for Rust terminal UIs
+- Lightweight with minimal dependencies
+- Well-documented with active maintenance
+- It has a funny name
 
 ### Refresh Rate
 
@@ -153,16 +142,17 @@ Alternatives like `cursive` exist, but `ratatui` is just a great name and it wor
 ui_refresh_interval_ms: 250  // 4 FPS
 ```
 
-**Why 250ms?**:
-- Fast enough to feel responsive
-- Slow enough to avoid excessive CPU
-- Faster updates would not improve UX, users wouldn't be able to parse the information that fast anyway
+250ms strikes a reasonable balance: fast enough to feel responsive to live data, slow enough to avoid unnecessary CPU usage. Faster refresh rates would not improve the user experience, as the underlying detection interval is 1 second.
 
-**Tradeoff**: Could detect terminal size changes dynamically, but not essential for demo.
+One potential enhancement would be dynamic terminal resize handling, though this is not essential for a demonstration.
+
+---
 
 ## Testing Strategy
 
 ### Unit Tests
+
+Unit tests cover the core logic in isolation:
 
 ```rust
 #[cfg(test)]
@@ -172,24 +162,19 @@ mod tests {
 }
 ```
 
-**What's Tested**:
-- Order book sorting logic
-- Profitable path detection
-- Edge cases (empty books, zero quantity)
+**Covered:**
+- Order book sorting (bids descending, asks ascending)
+- Checksum validation against the Kraken reference example
+- Arbitrage detection accuracy (profitable paths found, unprofitable paths correctly rejected)
+- Edge cases (empty books, zero quantity removal)
 
-**What's Not Tested**:
-- WebSocket I/O (would need mocking)
-- UI rendering (hard to test)
+**Not covered:**
+- WebSocket I/O (would require mocking the connection; checksum validation
+  on the order book side provides indirect confidence in data correctness)
+- UI rendering (impractical to assert terminal output)
 
-**Tradeoff**: 100% test coverage is expensive. We test core logic only.
+Full test coverage would be disproportionately expensive relative to the value for a project of this scope. The focus is on testing deterministic, pure logic.
 
 ### Integration Testing
 
-Could add:
-```bash
-# Start mock WebSocket server
-# Run application
-# Verify it connects and processes data
-```
-
-**Not Implemented**: Diminishing returns for a demo project.
+A more complete test suite could include a mock WebSocket server that replays recorded Kraken messages, with assertions on the resulting order book state and detected opportunities. This has not been implemented, as the marginal value over the existing unit tests is limited.

@@ -343,4 +343,32 @@ mod tests {
 
         assert!(book.has_valid_checksum());
     }
+
+    #[test]
+    fn test_empty_order_book() {
+        let (mut manager, _resync_rx) = OrderBookManager::new();
+
+        manager.update_book("TEST/USD".to_string(), vec![], vec![], None, true);
+
+        let book = manager.books.get("TEST/USD").unwrap();
+        assert!(book.best_bid().is_none());
+        assert!(book.best_ask().is_none());
+        assert!(book.spread_bps().is_none());
+    }
+
+    #[test]
+    fn test_zero_quantity_removes_level() {
+        let (mut manager, _resync_rx) = OrderBookManager::new();
+
+        // Insert a level
+        let bids = vec![("100.0".to_string(), "1.0".to_string())];
+        manager.update_book("TEST/USD".to_string(), bids, vec![], None, true);
+
+        // Remove it by sending zero quantity
+        let bids_zero = vec![("100.0".to_string(), "0.0".to_string())];
+        manager.update_book("TEST/USD".to_string(), bids_zero, vec![], None, false);
+
+        let book = manager.books.get("TEST/USD").unwrap();
+        assert!(book.best_bid().is_none(), "Level with zero quantity should be removed");
+    }
 }

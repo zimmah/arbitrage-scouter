@@ -338,4 +338,23 @@ mod tests {
             opportunities.iter().map(|o| o.profit_bps).collect::<Vec<_>>()
         );
     }
+
+    #[test]
+    fn test_empty_books_returns_no_opportunities() {
+        let config = Config {
+            min_profit_bps: 10,
+            detection_interval_ms: 1000,
+            ui_refresh_interval_ms: 250,
+        };
+        let detector = ArbitrageDetector::new(config);
+        let books = HashMap::new();
+
+        let opportunities = detector.detect_triangular_arbitrage(&books);
+        assert!(
+            opportunities.is_empty(),
+            "Expected no opportunities, but found {} with profit_bps: {:?}",
+            opportunities.len(),
+            opportunities.iter().map(|o| o.profit_bps).collect::<Vec<_>>()
+        );
+    }
 }
