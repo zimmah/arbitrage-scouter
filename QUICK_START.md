@@ -35,6 +35,8 @@ The terminal UI displays four panels:
 3. **Arbitrage Opportunities**: Detected profitable paths, if any exist
 4. **Statistics**: Update count, opportunities found, best profit seen, and checksum integrity.
 
+<img width="583" height="646" alt="screenshot of arbitrage sniper TUI" src="https://github.com/user-attachments/assets/42232271-d2aa-456c-a767-2b6d5f0d6ee3" />
+
 ## Controls
 
 | Key | Action |
