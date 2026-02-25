@@ -207,7 +207,7 @@ A width of at least 80 characters is recommended
 | Valid Checksums: ✅ All valid                                          |
 └────────────────────────────────────────────────────────────────────────┘
 ```
-<img width="657" height="710" alt="image" src="https://github.com/user-attachments/assets/47906179-f944-436a-badc-de7de281dbb5" />
+<img width="598" height="648" alt="window-3-zimmah@zimri-desktop ~WorkspaceGithubzimmahkraken-arbitrage-scouter-1771978829779" src="https://github.com/user-attachments/assets/b99f292d-0eb4-4353-b165-1f1fe53ad445" />
 
 
 ## Arbitrage Detection Logic
