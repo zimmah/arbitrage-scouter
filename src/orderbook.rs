@@ -15,143 +15,6 @@ pub fn format_value(value: &str) -> String {
     s.trim_start_matches('0').to_string()
 }
 
-/// Manages all order books and ensures data accuracy by checksum
-/// 
-/// Design decision: We keep the full order book (up to 10 levels deep)
-/// to enable accurate depth-based arbitrage calculations. We limit depth
-/// to 10 levels to balance accuracy with memory usage, arbitrage opportunities
-/// tend to be on the fringes of the order book anyway, so 10 is plenty.
-pub struct OrderBookManager {
-    books: HashMap<String, OrderBook>,
-    stats: Statistics,
-    start_time: chrono::DateTime<Utc>,
-    resync_tx: tokio::sync::mpsc::Sender<String>, // send symbol names that need resyncing
-}
-
-impl OrderBookManager {
-    pub fn new() -> (Self, tokio::sync::mpsc::Receiver<String>) {
-        let (resync_tx, resync_rx) = tokio::sync::mpsc::channel(32);
-        let manager = Self {
-            books: HashMap::new(),
-            stats: Statistics::default(),
-            start_time: Utc::now(),
-            resync_tx,
-        };
-        (manager, resync_rx)
-    }
-
-    pub fn all_checksums_valid(&self) -> bool {
-        self.books.values().all(|book| book.has_valid_checksum())
-    }
-
-    /// Update or insert an order book
-    /// Kraken sends:
-    /// - Initial snapshot (contains full order book)
-    /// - Updates (only changed levels)
-    pub fn update_book(
-        &mut self,
-        symbol: String,
-        bids: Vec<(String, String)>,
-        asks: Vec<(String, String)>,
-        checksum: Option<u32>,
-        is_snapshot: bool,
-    ) {
-        // Debug log first few updates
-        static UPDATE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let count = UPDATE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-        if count < 10 {
-            debug_log(&format!("[update_book #{}] Symbol: '{}', Bids: {}, Asks: {}",
-                count, symbol, bids.len(), asks.len()));
-        }
-
-        // Scoped block so the mutable borrow of 'book' end before we use 'self' again
-        let (bid_count, ask_count) = {
-            // Get existing book or create new one
-            let book = self.books.entry(symbol.clone()).or_insert_with(|| OrderBook::new(symbol.clone()));
-            
-            if is_snapshot {
-                book.load_snapshot(bids, asks);
-            } else {
-                book.apply_update(bids, asks);
-            }
-            
-            // Update timestamp and checksum
-            book.timestamp = Utc::now();
-            book.checksum = checksum.or(book.checksum);
-
-            let needs_resync = !book.has_valid_checksum();
-            if needs_resync {
-                book.bids.clear();
-                book.asks.clear();
-                book.checksum = None;
-                let _ = self.resync_tx.try_send(symbol);
-            }
-
-            (book.bids.len(), book.asks.len())
-        };
-
-        self.stats.total_orderbook_updates += 1;
-
-        if count < 10 {
-            debug_log(&format!("  -> Stored. Total books: {}, This book has {} bids, {} asks",
-                self.books.len(), bid_count, ask_count));
-        }
-    }
-
-    /// Get order books
-    pub fn get_books(&self) -> HashMap<String, OrderBook> {
-        let now = Utc::now();
-
-        // Debug: Log what we have
-        static DEBUG_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let count = DEBUG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        
-        if count < 5 {
-            debug_log(&format!("[get_books #{}] Total books in storage: {}", count, self.books.len()));
-            for (symbol, book) in self.books.iter() {
-                let age = now.signed_duration_since(book.timestamp);
-                let bid_count = book.bids.len();
-                let ask_count = book.asks.len();
-                debug_log(&format!("  {} - Age: {}ms, Bids: {}, Asks: {}", 
-                    symbol, age.num_milliseconds(), bid_count, ask_count));
-            }
-        }
-
-        let books = self.books.clone();
-        
-        if count < 5 {
-            debug_log(&format!("  -> Returning {} books", books.len()));
-        }
-
-        books
-    }
-
-    /// Get statistics for display
-    pub fn get_stats(&self) -> Statistics {
-        let mut stats = self.stats.clone();
-        stats.uptime_seconds = Utc::now()
-            .signed_duration_since(self.start_time)
-            .num_seconds() as u64;
-        stats.all_checksums_valid = self.all_checksums_valid();
-
-        stats
-    }
-
-    /// Record arbitrage opportunities so they can be displayed in the UI
-    pub fn record_opportunities(&mut self, count: usize, best_bps: u32) {
-        self.stats.total_opportunities_found += count as u64;
-        if best_bps > self.stats.best_opportunity_bps {
-            self.stats.best_opportunity_bps = best_bps;
-        }
-    }
-
-    /// Get number of active order books
-    pub fn active_book_count(&self) -> usize {
-        self.books.len()
-    }
-}
-
 /// Order book snapshot for a single trading pair
 #[derive(Debug, Clone)]
 pub struct OrderBook {
@@ -294,6 +157,143 @@ impl OrderBook {
         }
 
         computed == expected
+    }
+}
+
+/// Manages all order books and ensures data accuracy by checksum
+/// 
+/// Design decision: We keep the full order book (up to 10 levels deep)
+/// to enable accurate depth-based arbitrage calculations. We limit depth
+/// to 10 levels to balance accuracy with memory usage, arbitrage opportunities
+/// tend to be on the fringes of the order book anyway, so 10 is plenty.
+pub struct OrderBookManager {
+    books: HashMap<String, OrderBook>,
+    stats: Statistics,
+    start_time: chrono::DateTime<Utc>,
+    resync_tx: tokio::sync::mpsc::Sender<String>, // send symbol names that need resyncing
+}
+
+impl OrderBookManager {
+    pub fn new() -> (Self, tokio::sync::mpsc::Receiver<String>) {
+        let (resync_tx, resync_rx) = tokio::sync::mpsc::channel(32);
+        let manager = Self {
+            books: HashMap::new(),
+            stats: Statistics::default(),
+            start_time: Utc::now(),
+            resync_tx,
+        };
+        (manager, resync_rx)
+    }
+
+    pub fn all_checksums_valid(&self) -> bool {
+        self.books.values().all(|book| book.has_valid_checksum())
+    }
+
+    /// Update or insert an order book
+    /// Kraken sends:
+    /// - Initial snapshot (contains full order book)
+    /// - Updates (only changed levels)
+    pub fn update_book(
+        &mut self,
+        symbol: String,
+        bids: Vec<(String, String)>,
+        asks: Vec<(String, String)>,
+        checksum: Option<u32>,
+        is_snapshot: bool,
+    ) {
+        // Debug log first few updates
+        static UPDATE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let count = UPDATE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        if count < 10 {
+            debug_log(&format!("[update_book #{}] Symbol: '{}', Bids: {}, Asks: {}",
+                count, symbol, bids.len(), asks.len()));
+        }
+
+        // Scoped block so the mutable borrow of 'book' end before we use 'self' again
+        let (bid_count, ask_count) = {
+            // Get existing book or create new one
+            let book = self.books.entry(symbol.clone()).or_insert_with(|| OrderBook::new(symbol.clone()));
+            
+            if is_snapshot {
+                book.load_snapshot(bids, asks);
+            } else {
+                book.apply_update(bids, asks);
+            }
+            
+            // Update timestamp and checksum
+            book.timestamp = Utc::now();
+            book.checksum = checksum.or(book.checksum);
+
+            let needs_resync = !book.has_valid_checksum();
+            if needs_resync {
+                book.bids.clear();
+                book.asks.clear();
+                book.checksum = None;
+                let _ = self.resync_tx.try_send(symbol);
+            }
+
+            (book.bids.len(), book.asks.len())
+        };
+
+        self.stats.total_orderbook_updates += 1;
+
+        if count < 10 {
+            debug_log(&format!("  -> Stored. Total books: {}, This book has {} bids, {} asks",
+                self.books.len(), bid_count, ask_count));
+        }
+    }
+
+    /// Get order books
+    pub fn get_books(&self) -> HashMap<String, OrderBook> {
+        let now = Utc::now();
+
+        // Debug: Log what we have
+        static DEBUG_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let count = DEBUG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        
+        if count < 5 {
+            debug_log(&format!("[get_books #{}] Total books in storage: {}", count, self.books.len()));
+            for (symbol, book) in self.books.iter() {
+                let age = now.signed_duration_since(book.timestamp);
+                let bid_count = book.bids.len();
+                let ask_count = book.asks.len();
+                debug_log(&format!("  {} - Age: {}ms, Bids: {}, Asks: {}", 
+                    symbol, age.num_milliseconds(), bid_count, ask_count));
+            }
+        }
+
+        let books = self.books.clone();
+        
+        if count < 5 {
+            debug_log(&format!("  -> Returning {} books", books.len()));
+        }
+
+        books
+    }
+
+    /// Get statistics for display
+    pub fn get_stats(&self) -> Statistics {
+        let mut stats = self.stats.clone();
+        stats.uptime_seconds = Utc::now()
+            .signed_duration_since(self.start_time)
+            .num_seconds() as u64;
+        stats.all_checksums_valid = self.all_checksums_valid();
+
+        stats
+    }
+
+    /// Record arbitrage opportunities so they can be displayed in the UI
+    pub fn record_opportunities(&mut self, count: usize, best_bps: u32) {
+        self.stats.total_opportunities_found += count as u64;
+        if best_bps > self.stats.best_opportunity_bps {
+            self.stats.best_opportunity_bps = best_bps;
+        }
+    }
+
+    /// Get number of active order books
+    pub fn active_book_count(&self) -> usize {
+        self.books.len()
     }
 }
 
