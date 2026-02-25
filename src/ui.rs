@@ -17,8 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-use crate::orderbook::{OrderBookManager, OrderBook};
 use crate::arbitrage::ArbitrageDetector;
+use crate::orderbook::{OrderBookManager, OrderBook};
 use crate::types::{Statistics, ArbitrageOpportunity};
 
 // run the terminal UI
@@ -52,62 +52,6 @@ pub async fn run_tui(
     result
 }
 
-async fn run_ui_loop(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    orderbook_manager: Arc<RwLock<OrderBookManager>>,
-    arbitrage_detector: Arc<ArbitrageDetector>,
-    ui_refresh_interval_ms: u64,
-) -> Result<()> {
-    loop {
-        // Get current data
-        let (books, stats, book_count) = {
-            let manager = orderbook_manager.read().await;
-            (manager.get_books(), manager.get_stats(), manager.active_book_count())
-        };
-        let opportunities = arbitrage_detector.get_opportunities().await;
-
-        // Render UI
-        terminal.draw(|f| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3), // Header
-                    Constraint::Length(book_count as u16 + 2), // Order Books
-                    Constraint::Min(15), // Opportunities
-                    Constraint::Length(6), // Stats
-                ])
-                .split(f.area());
-
-            // Header
-            render_header(f, chunks[0], &stats);
-
-            // Order books
-            render_orderbooks(f, chunks[1], &books);
-
-            // Opportunities
-            render_opportunities(f, chunks[2], &opportunities); 
-
-            // Statistics
-            render_stats(f, chunks[3], &stats);
-        })?;
-
-        // Check for exit key (non-blocking)
-        if event::poll(Duration::from_millis(ui_refresh_interval_ms))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
-                        return Ok(());
-                    }
-                    KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-                        return Ok(());
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-}
-
 fn render_header(
     f: &mut ratatui::Frame,
     area: Rect,
@@ -127,6 +71,7 @@ fn render_header(
     f.render_widget(paragraph, area);
 }
 
+/// Renders the live orderbooks
 fn render_orderbooks(
     f: &mut ratatui::Frame,
     area: Rect,
@@ -174,7 +119,9 @@ fn render_orderbooks(
     f.render_widget(list, area);
 }
 
-// Placeholder
+/// Renders the arbitrage opportunities as long as they're valid
+/// Since opportunities tend to be rare and short lived, a History should be added
+/// Perhaps pressing H should toggle historical view and live view
 fn render_opportunities(
     f: &mut ratatui::Frame,
     area: Rect,
@@ -198,7 +145,7 @@ fn render_opportunities(
                     format!("Profit: {:.2}%", profit_pct),
                     Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(format!("  Max: ${:.2}", opp.max_executable_usd)),
+                Span::raw(format!("  Max: ${:.2}, (profit: ${:.2})", opp.max_executable_usd, opp.profit_usd(f64::MAX))),
             ]);
             items.push(ListItem::new(header));
 
@@ -269,5 +216,61 @@ fn format_uptime(seconds: u64) -> String {
         format!("{}m {}s", minutes, secs)
     } else {
         format!("{}s", secs)
+    }
+}
+
+async fn run_ui_loop(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    orderbook_manager: Arc<RwLock<OrderBookManager>>,
+    arbitrage_detector: Arc<ArbitrageDetector>,
+    ui_refresh_interval_ms: u64,
+) -> Result<()> {
+    loop {
+        // Get current data
+        let (books, stats, book_count) = {
+            let manager = orderbook_manager.read().await;
+            (manager.get_books(), manager.get_stats(), manager.active_book_count())
+        };
+        let opportunities = arbitrage_detector.get_opportunities().await;
+
+        // Render UI
+        terminal.draw(|f| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3), // Header
+                    Constraint::Length(book_count as u16 + 2), // Order Books
+                    Constraint::Min(15), // Opportunities
+                    Constraint::Length(6), // Stats
+                ])
+                .split(f.area());
+
+            // Header
+            render_header(f, chunks[0], &stats);
+
+            // Order books
+            render_orderbooks(f, chunks[1], &books);
+
+            // Opportunities
+            render_opportunities(f, chunks[2], &opportunities); 
+
+            // Statistics
+            render_stats(f, chunks[3], &stats);
+        })?;
+
+        // Check for exit key (non-blocking)
+        if event::poll(Duration::from_millis(ui_refresh_interval_ms))? {
+            if let Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                        return Ok(());
+                    }
+                    KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 }

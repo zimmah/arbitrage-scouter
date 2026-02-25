@@ -207,7 +207,7 @@ A width of at least 80 characters is recommended
 | Valid Checksums: ✅ All valid                                          |
 └────────────────────────────────────────────────────────────────────────┘
 ```
-<img width="583" height="646" alt="image" src="https://github.com/user-attachments/assets/42232271-d2aa-456c-a767-2b6d5f0d6ee3" />
+<img width="583" height="646" alt="screenshot of arbitrage sniper TUI" src="https://github.com/user-attachments/assets/42232271-d2aa-456c-a767-2b6d5f0d6ee3" />
 
 ## Arbitrage Detection Logic
 

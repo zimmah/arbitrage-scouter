@@ -1,7 +1,7 @@
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use chrono::{DateTime, Utc};
 
 /// Application configuration
 #[derive(Debug, Clone)]
@@ -21,15 +21,28 @@ pub struct ArbitrageOpportunity {
     pub path: Vec<TradeStep>,
     pub max_executable_usd: f64, // Maximum amount that can be traded
     pub profit_bps: u32,         // Profit in basis points
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: DateTime<Utc>, // currently unused, therefore #[allow(dead_code)]
 }
 
-// impl ArbitrageOpportunity {
-//     /// Calculate the absolute profit in USD for a given input amount
-//     pub fn profit_usd(&self, input_usd: f64) -> f64 {
-//         input_usd.min(self.max_executable_usd) * (self.profit_bps as f64 / 10000.0)
-//     }
-// }
+impl ArbitrageOpportunity {
+    /// Calculate the absolute profit in USD for a given input amount
+    pub fn profit_usd(&self, input_usd: f64) -> f64 {
+        input_usd.min(self.max_executable_usd) * (self.profit_bps as f64 / 10000.0)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CanonicalDecimal {
+    pub value: Decimal,
+    pub raw: String,
+}
+
+impl CanonicalDecimal {
+    pub fn from_raw(raw_json: &str) -> Option<Self> {
+        let value = Decimal::from_str_exact(raw_json).ok()?;
+        Some(Self { value, raw: raw_json.to_owned() })
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct PriceLevel {
@@ -50,28 +63,6 @@ impl PriceLevel {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct CanonicalDecimal {
-    pub value: Decimal,
-    pub raw: String,
-}
-
-impl CanonicalDecimal {
-    pub fn from_raw(raw_json: &str) -> Option<Self> {
-        let value = Decimal::from_str_exact(raw_json).ok()?;
-        Some(Self { value, raw: raw_json.to_owned() })
-    }
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct TradeStep {
-    pub action: TradeAction,
-    pub symbol: String,
-    pub rate: f64,
-    pub max_quantity: f64, // Maximum amount tradeable at this step
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum TradeAction {
     Buy,
@@ -87,6 +78,15 @@ impl std::fmt::Display for TradeAction {
     }
 }
 
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct TradeStep {
+    pub action: TradeAction,
+    pub symbol: String,
+    pub rate: f64,
+    pub max_quantity: f64, // Maximum amount tradeable at this step
+}
+
 /// Statistics for the application
 #[derive(Debug, Clone, Default)]
 pub struct Statistics {
@@ -100,13 +100,6 @@ pub struct Statistics {
 // ============================================================================
 // Kraken WebSocket Protocol Types
 // ============================================================================
-
-#[derive(Serialize)]
-pub struct KrakenSubscribe {
-    pub method: String,
-    pub params: SubscribeParams,
-}
-
 #[derive(Serialize)]
 pub struct SubscribeParams {
     pub channel: String,
@@ -114,13 +107,21 @@ pub struct SubscribeParams {
     pub snapshot: bool,
 }
 
+#[derive(Serialize)]
+pub struct KrakenSubscribe {
+    pub method: String,
+    pub params: SubscribeParams,
+}
+
 #[derive(Deserialize, Debug)]
-#[allow(dead_code)] // channel isn't currently used, but it's good to know it exists
-pub struct KrakenMessage {
-    #[serde(rename = "type")]
-    pub msg_type: Option<String>,
-    pub channel: Option<String>,
-    pub data: Option<Vec<BookData>>,
+pub struct BookLevel {
+    // RawValue preserves exact numeric precision without floating point rounding.
+    // Kraken's v2 WebSocket API sends prices as unquoted JSON numbers per the spec
+    // https://docs.kraken.com/api/docs/guides/spot-ws-intro/
+    // .get() returns the raw JSON text (e.g. "45283.5"), which we parse directly
+    // into Decimal via CanonicalDecimal::from_raw().
+    pub price:  Box<RawValue>,
+    pub qty: Box<RawValue>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -134,12 +135,10 @@ pub struct BookData {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct BookLevel {
-    // RawValue preserves exact numeric precision without floating point rounding.
-    // Kraken's v2 WebSocket API sends prices as unquoted JSON numbers per the spec https://docs.kraken.com/api/docs/guides/spot-ws-intro/.
-    // .get() returns the raw JSON text (e.g. "45283.5"), which we parse directly
-    // into Decimal via CanonicalDecimal::from_raw().
-    pub price:  Box<RawValue>,
-    pub qty: Box<RawValue>,
+#[allow(dead_code)] // channel isn't currently used, but it's good to know it exists
+pub struct KrakenMessage {
+    #[serde(rename = "type")]
+    pub msg_type: Option<String>,
+    pub channel: Option<String>,
+    pub data: Option<Vec<BookData>>,
 }
-

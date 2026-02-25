@@ -1,9 +1,9 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use chrono::Utc;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use crate::types::{ArbitrageOpportunity, Config, TradeAction, TradeStep};
 use crate::orderbook::OrderBook;
@@ -30,7 +30,7 @@ impl ArbitrageDetector {
         }
     }
 
-    /// Detect all triangular arbitrage opportunities in the current order boosk
+    /// Detect all triangular arbitrage opportunities in the current order books
     pub fn detect_triangular_arbitrage(
         &self,
         books: &HashMap<String, OrderBook>,

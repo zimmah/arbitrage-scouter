@@ -1,20 +1,20 @@
+mod arbitrage;
 mod orderbook;
 mod types;
 mod ui;
-mod websocket;
 mod utils;
-mod arbitrage;
+mod websocket;
 
 use anyhow::Result;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-use crate::orderbook::OrderBookManager;
-use crate::websocket::run_websocket_client;
-use crate::ui::run_tui;
-use crate::types::Config;
 use crate::arbitrage::ArbitrageDetector;
+use crate::orderbook::OrderBookManager;
+use crate::types::Config;
+use crate::ui::run_tui;
+use crate::websocket::run_websocket_client;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -28,9 +28,8 @@ async fn main() -> Result<()> {
     // Trading pairs to monitor
     // These form triangular arbitrage paths
     let symbols = vec![
-        "BTC/USD", "ETH/USD", "ETH/BTC",
-        "XRP/USD", "XRP/BTC", "XRP/ETH",
-        "SOL/USD", "SOL/BTC",
+        "BTC/USD", "ETH/USD", "ETH/BTC", "XRP/USD",
+        "XRP/BTC", "XRP/ETH", "SOL/USD", "SOL/BTC",
     ];
 
     let (manager, resync_rx) = OrderBookManager::new();
