@@ -17,3 +17,6 @@ Thumbs.db
 
 # Output
 *.log
+
+# Github
+/.github/
