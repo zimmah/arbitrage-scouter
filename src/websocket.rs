@@ -94,7 +94,7 @@ async fn connect_and_subscribe(
                     Some(Ok(Message::Text(text))) => {
                         message_count += 1;
                         if message_count <= 3 {
-                            eprintln!("WebSocket Message #{}: {}", message_count, &text[..text.len().min(300)]);
+                            debug_log(&format!("WebSocket Message #{}: {}", message_count, &text[..text.len().min(300)]));
                         }
                         handle_message(&text, orderbook_manager, message_count).await?;
                     }
@@ -174,7 +174,7 @@ async fn handle_message(
             let ask_count = book_data.asks.as_ref().map(|b| b.len()).unwrap_or(0);
 
             if message_number <= 10 {
-                eprintln!("[WebSocket]   {} - {} bids, {} asks", book_data.symbol, bid_count, ask_count)
+                debug_log(&format!("[WebSocket]   {} - {} bids, {} asks", book_data.symbol, bid_count, ask_count))
             }
 
             update_orderbook(orderbook_manager, book_data, is_snapshot).await;
