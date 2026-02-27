@@ -8,8 +8,9 @@ This document covers the technical decisions, architectural tradeoffs, and async
 2. [Data Flow](#data-flow)
 3. [Performance Considerations](#performance-considerations)
 4. [Depth Calculation Design](#depth-calculation-design)
-5. [UI Design](#ui-design)
-6. [Testing Strategy](#testing-strategy)
+5. [Production Awareness & Real-World Constraints](#production-awareness--real-world-constraints)
+6. [UI Design](#ui-design)
+7. [Testing Strategy](#testing-strategy)
 
 ---
 
@@ -30,10 +31,10 @@ ui.rs            - Terminal rendering and user input
 
 ### Why This Structure?
 
-- **Testability**: Pure functions in `arbitrage.rs` and `orderbook.rs` can be unit tested without any I/O
+- **Testability**: Pure functions in `arbitrage.rs` can be unit tested without any I/O
 - **Clarity**: Each module can be understood in isolation
 - **Maintainability**: UI changes do not affect arbitrage logic, and vice versa
-- **Reusability**: `arbitrage.rs` and `orderbook.rs` could be reused with an entirely different frontend
+- **Reusability**: `arbitrage.rs` could be reused with an entirely different frontend
 
 ---
 
@@ -76,10 +77,7 @@ ui.rs            - Terminal rendering and user input
 Memory usage is negligible for this application.
 
 ### CPU Usage
-
-The arbitrage detector is the primary computational component. It runs every second, checks approximately 8 triangular paths, and performs roughly 10 floating-point operations per path — around 80 FLOPs per second in total. In practice this consumes less than 1% CPU on modern hardware.
-
-If parallelism were needed, path checking could be distributed across threads using `rayon`. This is unnecessary at the current scale.
+The arbitrage detector runs once per second, checking approximately 8 triangular paths with roughly 10 floating-point operations each. Despite using rust_decimal for precision (which is more expensive than native floats), measured CPU usage remains well under 1% on modern hardware at this interval. If parallelism were ever needed, path checking could be distributed across threads using rayon, though this is unnecessary at the current scale.
 
 ### Network
 
@@ -90,9 +88,19 @@ WebSocket traffic from Kraken is approximately 1–5 KB/s of compressed JSON. La
 `RwLock` is used throughout to optimise for the read-heavy access pattern:
 
 - **Read locks** never contend with each other (multiple concurrent readers are permitted)
-- **Write locks** are acquired infrequently: the WebSocket client writes on each update (typically ~277 times/second), and the detector writes once per second
+- **Write locks** are acquired on each market data update (typically ~277 times/second under normal activity, higher during volatile periods), and once per second by the detector
 
-Total write lock hold time is well under 0.1% — lock contention is not a bottleneck.
+Total write lock hold time is well under 0.1% of wall time, so lock contention is not a bottleneck at this scale.
+
+At higher scale, per-symbol lock sharding or a lock-free snapshot approach (e.g. `DashMap`, or atomic pointer swapping) would be worth evaluating. For this project, a single `RwLock` over the full book map is simple, correct, and sufficient.
+
+### Order Book Cloning
+
+`get_books()` clones the entire `HashMap` on each detection interval. This is the correct approach for this architecture: it gives the detector a stable snapshot to work on without holding the read lock during calculations (which would delay writers), and without the lifetime complexity of passing references across lock boundaries. The memory overhead is negligible at this scale. In a production system with thousands of symbols, an atomic pointer swap to an immutable snapshot would avoid the allocation cost while preserving the same semantics.
+
+### Debug Logging
+
+`debug_log()` uses blocking file I/O (`OpenOptions`) inside an async context. This is acceptable for a development tool but would be inappropriate in production, where a non-blocking structured logger such as `tracing` with a dedicated logging task would be used instead.
 
 ---
 
@@ -120,6 +128,41 @@ let max_executable_usd = /* minimum constraint across all steps */;
 ```
 
 This approach respects actual liquidity at each step, identifies the binding constraint, and produces a realistic upper bound on profit. The tradeoff is added code complexity, which is justified by the accuracy improvement.
+
+---
+
+## Production Awareness & Real-World Constraints
+
+This project is intentionally scoped as a real-time detection and systems-design exercise. In production trading infrastructure, several additional constraints would materially affect implementation decisions.
+
+### 1. Fees & Slippage Modeling
+
+The current implementation excludes trading fees and market impact. In practice, exchange fees vary by account tier and volume, maker vs taker fees significantly alter profitability, slippage must be modeled based on depth consumption, and partial fills introduce execution risk. A production-grade system would incorporate fee-aware profitability thresholds, dynamic slippage estimation, and conservative execution buffers. The exclusion here is intentional to keep focus on async architecture and depth-aware liquidity modeling.
+
+### 2. Latency Sensitivity
+
+The detector runs on a 1-second interval. In real markets, triangular arbitrage windows often close in milliseconds, and competing systems operate colocated with exchanges where network round-trip time is a dominant factor. A production implementation would require event-driven detection triggered on each book update, microsecond-level latency optimisation, and likely colocated infrastructure. For this project, a timer-based interval was chosen deliberately. Triggering detection on every book update was evaluated but rejected: at ~277 updates/second, event-driven scanning produced a significant CPU increase with no practical benefit for a demonstration tool. The 1-second interval keeps CPU usage negligible while still surfacing opportunities in a useful timeframe. The current design favours clarity and resource efficiency over ultra-low latency.
+
+### 3. Hardcoded Triangular Paths
+
+Arbitrage paths are currently defined statically:
+
+```rust
+let paths = vec![
+    TriangularPath { base_pair: "BTC/USD", intermediate_pair: "ETH/BTC", quote_pair: "ETH/USD" },
+    ...
+];
+```
+
+A more general approach would dynamically derive all valid cycles from an adjacency graph built from the subscribed symbol list. Static paths were chosen here to keep detection predictable, scoped, and easy to reason about for demonstration purposes.
+
+### 4. Execution Infrastructure
+
+This system performs detection only. Production arbitrage requires atomic multi-leg execution, balance tracking per asset, capital allocation logic, risk controls (maximum exposure, kill switches), and retry and rollback strategies. Execution introduces significantly more complexity than detection and would fundamentally change the architecture.
+
+### 5. Capital & Inventory Constraints
+
+The demo assumes unconstrained inventory and ignores balance fragmentation. Real systems must consider available balances per asset, pre-positioned inventory to avoid transfer latency, opportunity cost of locked capital, and dynamic allocation across competing paths. A production system would integrate portfolio state directly into path evaluation.
 
 ---
 
@@ -169,12 +212,11 @@ mod tests {
 - Edge cases (empty books, zero quantity removal)
 
 **Not covered:**
-- WebSocket I/O (would require mocking the connection; checksum validation
-  on the order book side provides indirect confidence in data correctness)
+- WebSocket I/O (would require mocking the connection; checksum validation on the order book side provides indirect confidence in data correctness)
 - UI rendering (impractical to assert terminal output)
 
-Full test coverage would be disproportionately expensive relative to the value for a project of this scope. The focus is on testing deterministic, pure logic.
+The focus is on testing deterministic, pure logic where tests provide the highest signal.
 
 ### Integration Testing
 
-A more complete test suite could include a mock WebSocket server that replays recorded Kraken messages, with assertions on the resulting order book state and detected opportunities. This has not been implemented, as the marginal value over the existing unit tests is limited.
+A more complete test suite could include a mock WebSocket server that replays recorded Kraken messages, with assertions on the resulting order book state and detected opportunities. This has not been implemented, as the marginal value over the existing unit tests is limited for a demonstration project.
