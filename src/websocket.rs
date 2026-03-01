@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -19,6 +20,7 @@ pub async fn run_websocket_client(
     symbols: Vec<&str>,
     orderbook_manager: Arc<RwLock<OrderBookManager>>,
     mut resync_rx: tokio::sync::mpsc::Receiver<String>,
+    connected: &Arc<AtomicBool>,
 ) -> Result<()> {
     let symbols: Vec<String> = symbols.iter().map(|s| s.to_string()).collect();
     let url = "wss://ws.kraken.com/v2";
@@ -33,7 +35,7 @@ pub async fn run_websocket_client(
     loop {
         let connected_at = tokio::time::Instant::now();
 
-        match connect_and_subscribe(url, &symbols, &orderbook_manager, &mut resync_rx).await {
+        match connect_and_subscribe(url, &symbols, &orderbook_manager, &mut resync_rx, &connected).await {
             Ok(_) => {
                 debug_log(&format!("[WebSocket] Connection closed normally"));
             }
@@ -60,12 +62,14 @@ async fn connect_and_subscribe(
     symbols: &[String],
     orderbook_manager: &Arc<RwLock<OrderBookManager>>,
     resync_rx: &mut tokio::sync::mpsc::Receiver<String>,
+    connected: &Arc<AtomicBool>,
 ) -> Result<()> {
     // Connect to WebSocket
     let (ws_stream, response) = connect_async(url)
         .await
         .context("Failed to connect to Kraken WebSocket")?;
     
+    connected.store(true, Ordering::Relaxed);
     debug_log(&format!("[WebSocket] Connected! Response: {}", response.status()));
 
     let (mut write, mut read) = ws_stream.split();
@@ -125,7 +129,7 @@ async fn connect_and_subscribe(
         }
     }
 
-
+    connected.store(false, Ordering::Relaxed);
     Ok(())
 }
 

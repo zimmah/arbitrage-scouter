@@ -177,6 +177,9 @@ cargo build --release
 # Run the application
 cargo run --release
 
+# Run in quiet mode (does not write to debug.log)
+cargo run -- --quiet
+
 # Run tests
 cargo test
 

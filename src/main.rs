@@ -7,6 +7,7 @@ mod websocket;
 
 use anyhow::Result;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
@@ -14,6 +15,7 @@ use crate::arbitrage::ArbitrageDetector;
 use crate::orderbook::OrderBookManager;
 use crate::types::Config;
 use crate::ui::run_tui;
+use crate::utils::set_quiet;
 use crate::websocket::run_websocket_client;
 
 #[tokio::main]
@@ -24,6 +26,11 @@ async fn main() -> Result<()> {
         detection_interval_ms: 1000,
         ui_refresh_interval_ms: 250,
     };
+
+    let quiet = std::env::args().any(|a| a == "--quiet");
+    set_quiet(quiet);
+
+    let ws_connected = Arc::new(AtomicBool::new(false));
 
     // Trading pairs to monitor
     // These form triangular arbitrage paths
@@ -36,23 +43,15 @@ async fn main() -> Result<()> {
     // Shared state: order books and detected opportunities
     let orderbook_manager = Arc::new(RwLock::new(manager));
     let arbitrage_detector = Arc::new(ArbitrageDetector::new(config.clone()));
+    let ws_connection_status = Arc::clone(&ws_connected);
 
     // Spawn WebSocket task
     let ws_handle = tokio::spawn({
         let orderbook_manager = Arc::clone(&orderbook_manager);
         async move {
-            run_websocket_client(symbols, orderbook_manager, resync_rx).await
+            run_websocket_client(symbols, orderbook_manager, resync_rx, &ws_connection_status).await
         }
     });
-
-    // Wait for initial data to populate
-    eprintln!("\nWaiting 5 seconds for initial data...");
-    eprintln!("(Debug info will be written to debug.log)");
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
-    eprintln!("Starting TUI...\n");
-    // Small delay to let messages finish printing
-    tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Spawn arbitrage detection task
     let detection_handle = tokio::spawn({
@@ -90,6 +89,7 @@ async fn main() -> Result<()> {
         Arc::clone(&orderbook_manager),
         Arc::clone(&arbitrage_detector),
         config.ui_refresh_interval_ms,
+        &ws_connected,
     ).await;
 
     // Cleanup: abort background tasks

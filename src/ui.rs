@@ -12,8 +12,9 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Terminal,
 };
-use std::io;
+use std::{io, sync::atomic::AtomicBool};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
@@ -26,6 +27,7 @@ pub async fn run_tui(
     orderbook_manager: Arc<RwLock<OrderBookManager>>,
     arbitrage_detector: Arc<ArbitrageDetector>,
     ui_refresh_interval_ms: u64,
+    ws_connected: &Arc<AtomicBool>,
 ) -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
@@ -34,11 +36,8 @@ pub async fn run_tui(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Clear the terminal to avoid artifacts from debug output
-    terminal.clear()?;
-
     // Run the UI loop
-    let result = run_ui_loop(&mut terminal, orderbook_manager, arbitrage_detector, ui_refresh_interval_ms).await;
+    let result = run_ui_loop(&mut terminal, orderbook_manager, arbitrage_detector, ui_refresh_interval_ms, ws_connected).await;
 
     // Restore terminal
     disable_raw_mode()?;
@@ -86,12 +85,15 @@ fn render_orderbooks(
                 Style::default().fg(Color::Yellow),
             ),
         ])));
-        items.push(ListItem::new(Line::from(vec![
-            Span::styled(
-                "(Check debug.log for debug messages",
-                Style::default().fg(Color::DarkGray),
-            ),
-        ])));
+
+        if !crate::utils::is_quiet() {
+            items.push(ListItem::new(Line::from(vec![
+                Span::styled(
+                    "(Check debug.log for debug messages)",
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ])));
+        }
     } else {
         let mut sorted_books: Vec<_> = books.iter().collect();
         sorted_books.sort_by_key(|(symbol, _)| symbol.as_str());
@@ -174,9 +176,13 @@ fn render_stats(
     f: &mut ratatui::Frame,
     area: Rect,
     stats: &Statistics,
+    ws_connected: &Arc<AtomicBool>,
 ) {
     let checksum_color = if stats.all_checksums_valid { Color::Green } else { Color::Red };
     let checksum_text = if stats.all_checksums_valid { "✅ All valid" } else { "❌ Invalid" };
+    let connected = ws_connected.load(Ordering::Relaxed);
+    let connection_status_color = if connected { Color::Green} else { Color::Yellow };
+    let connection_status_text = if connected { "🟢 Connected" } else { "🟠 Connecting" };
 
     let text = vec![
         Line::from(vec![
@@ -197,6 +203,10 @@ fn render_stats(
         Line::from(vec![
             Span::styled("Valid Checksums: ", Style::default().fg(Color::Gray)),
             Span::styled(checksum_text, Style::default().fg(checksum_color)),
+        ]),
+        Line::from(vec![
+            Span::styled("Connection Status: ", Style::default().fg(Color::Gray)),
+            Span::styled(connection_status_text, Style::default().fg(connection_status_color)),
         ]),
     ];
 
@@ -224,6 +234,7 @@ async fn run_ui_loop(
     orderbook_manager: Arc<RwLock<OrderBookManager>>,
     arbitrage_detector: Arc<ArbitrageDetector>,
     ui_refresh_interval_ms: u64,
+    ws_connected: &Arc<AtomicBool>,
 ) -> Result<()> {
     loop {
         // Get current data
@@ -232,6 +243,8 @@ async fn run_ui_loop(
             (manager.get_books(), manager.get_stats(), manager.active_book_count())
         };
         let opportunities = arbitrage_detector.get_opportunities().await;
+        let min_height: u16 = if crate::utils::is_quiet() { 3 } else { 4 };
+        let orderbook_section_size: u16 = (2 + book_count as u16).max(min_height);
 
         // Render UI
         terminal.draw(|f| {
@@ -239,9 +252,9 @@ async fn run_ui_loop(
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Length(3), // Header
-                    Constraint::Length(book_count as u16 + 2), // Order Books
-                    Constraint::Min(15), // Opportunities
-                    Constraint::Length(6), // Stats
+                    Constraint::Length(orderbook_section_size), // Order Books
+                    Constraint::Min(6), // Opportunities
+                    Constraint::Length(7), // Stats
                 ])
                 .split(f.area());
 
@@ -255,7 +268,7 @@ async fn run_ui_loop(
             render_opportunities(f, chunks[2], &opportunities); 
 
             // Statistics
-            render_stats(f, chunks[3], &stats);
+            render_stats(f, chunks[3], &stats, ws_connected);
         })?;
 
         // Check for exit key (non-blocking)
