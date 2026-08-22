@@ -10,24 +10,19 @@ description = "Real-time cryptocurrency arbitrage detection using async Rust and
 # Async runtime
 tokio = { version = "1.41", features = ["full"] }
 
-# WebSocket (uses vendored OpenSSL - no system dependencies needed)
-tokio-tungstenite = { version = "0.24", features = ["native-tls-vendored"] }
-futures-util = "0.3"
-
-# Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0", features = ["raw_value"] }
+# Kraken WebSocket v2 market data: connection, reconnect, subscriptions,
+# checksum-validated order books. Path dependency until it is on crates.io.
+kraken-ws-v2 = { version = "0.1.0", path = "../kraken-v2-ws" }
 
 # Terminal UI
 ratatui = "0.29"
 crossterm = "0.28"
 
-# Error handling
+# Error handling at the application boundary
 anyhow = "1.0"
 
 # Utilities
 chrono = "0.4"
-crc32fast = "1.5.0"
 rust_decimal = "1.40.0"
 
 [profile.release]

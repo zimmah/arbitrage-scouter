@@ -28,21 +28,17 @@ async fn main() -> Result<()> {
     // Trading pairs to monitor
     // These form triangular arbitrage paths
     let symbols = vec![
-        "BTC/USD", "ETH/USD", "ETH/BTC", "XRP/USD",
-        "XRP/BTC", "XRP/ETH", "SOL/USD", "SOL/BTC",
+        "BTC/USD", "ETH/USD", "ETH/BTC", "XRP/USD", "XRP/BTC", "XRP/ETH", "SOL/USD", "SOL/BTC",
     ];
 
-    let (manager, resync_rx) = OrderBookManager::new();
     // Shared state: order books and detected opportunities
-    let orderbook_manager = Arc::new(RwLock::new(manager));
+    let orderbook_manager = Arc::new(RwLock::new(OrderBookManager::new()));
     let arbitrage_detector = Arc::new(ArbitrageDetector::new(config.clone()));
 
     // Spawn WebSocket task
     let ws_handle = tokio::spawn({
         let orderbook_manager = Arc::clone(&orderbook_manager);
-        async move {
-            run_websocket_client(symbols, orderbook_manager, resync_rx).await
-        }
+        async move { run_websocket_client(symbols, orderbook_manager).await }
     });
 
     // Wait for initial data to populate
@@ -75,7 +71,11 @@ async fn main() -> Result<()> {
                 let opportunities = arbitrage_detector.detect_triangular_arbitrage(&books);
 
                 if !opportunities.is_empty() {
-                    let best_bps = opportunities.iter().map(|o| o.profit_bps).max().unwrap_or(0);
+                    let best_bps = opportunities
+                        .iter()
+                        .map(|o| o.profit_bps)
+                        .max()
+                        .unwrap_or(0);
                     let mut manager = orderbook_manager.write().await;
                     manager.record_opportunities(opportunities.len(), best_bps);
                 }
@@ -90,7 +90,8 @@ async fn main() -> Result<()> {
         Arc::clone(&orderbook_manager),
         Arc::clone(&arbitrage_detector),
         config.ui_refresh_interval_ms,
-    ).await;
+    )
+    .await;
 
     // Cleanup: abort background tasks
     ws_handle.abort();
