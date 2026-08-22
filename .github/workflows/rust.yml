@@ -16,7 +16,18 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        path: arbitrage-scouter
+    # kraken-ws-v2 is a path dependency at ../kraken-v2-ws until it is
+    # published; check it out as a sibling so the build resolves. Once the
+    # crate is on crates.io, drop this step and the path key in Cargo.toml.
+    - uses: actions/checkout@v4
+      with:
+        repository: zimmah/kraken-v2-ws
+        path: kraken-v2-ws
     - name: Build
       run: cargo build --verbose
+      working-directory: arbitrage-scouter
     - name: Run tests
       run: cargo test --verbose
+      working-directory: arbitrage-scouter
