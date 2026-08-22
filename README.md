@@ -192,7 +192,7 @@ A terminal width of at least 80 characters is recommended.
 │ Kraken Arbitrage Scouter | Press 'q' to quit | Uptime: 2m 34s          │
 └────────────────────────────────────────────────────────────────────────┘
 ┌─ Order Books (Live) ───────────────────────────────────────────────────┐
-│ BTC/USD       Bid:    47234.5000  Ask:    67241.3000  Spread:  1.4 bps │
+│ BTC/USD       Bid:    47234.5000  Ask:    47241.3000  Spread:  1.4 bps │
 │ ETH/USD       Bid:     2456.7800  Ask:     2457.9200  Spread:  4.6 bps │
 │ ETH/BTC       Bid:        0.0520  Ask:        0.0521  Spread:  1.9 bps │
 └────────────────────────────────────────────────────────────────────────┘
