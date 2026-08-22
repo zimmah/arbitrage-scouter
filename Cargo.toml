@@ -12,7 +12,7 @@ tokio = { version = "1.41", features = ["full"] }
 
 # Kraken WebSocket v2 market data: connection, reconnect, subscriptions,
 # checksum-validated order books. Path dependency until it is on crates.io.
-kraken-ws-v2 = { version = "0.1.0", path = "../kraken-v2-ws" }
+kraken-ws-v2 = { version = "0.1.0", path = "../kraken-ws-v2" }
 
 # Terminal UI
 ratatui = "0.29"

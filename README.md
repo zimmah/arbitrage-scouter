@@ -8,7 +8,7 @@ Maintains live, checksum-validated order books for multiple trading pairs and co
 
 ## What it does
 
-- **Live market data via [kraken-ws-v2](https://github.com/zimmah/kraken-v2-ws)**: connection management, reconnection with backoff, subscriptions, and checksum-validated order books all come from the crate this project was extracted into. The scouter consumes its typed event stream; every book it computes on has already passed CRC32 validation, and resyncs after a checksum failure are automatic and visible in the UI.
+- **Live market data via [kraken-ws-v2](https://github.com/zimmah/kraken-ws-v2)**: connection management, reconnection with backoff, subscriptions, and checksum-validated order books all come from the crate this project was extracted into. The scouter consumes its typed event stream; every book it computes on has already passed CRC32 validation, and resyncs after a checksum failure are automatic and visible in the UI.
 - **Depth-aware opportunity sizing**: arbitrage paths are walked level by level (VWAP) through the book, working backward from the final leg to find the liquidity bottleneck. The result is a profit percentage _and_ the maximum executable volume, reflecting real market microstructure rather than a magic notional.
 - **Live terminal UI**: flicker-free ratatui interface showing books, spreads, detected opportunities, and checksum status in real time.
 
@@ -39,7 +39,7 @@ See [DESIGN.md](DESIGN.md) for the full design notes.
 
 ## Design decisions & tradeoffs
 
-**Market data lives in a crate, arbitrage logic lives here.** The WebSocket connection, subscription handling, book maintenance, and checksum validation were extracted into [kraken-ws-v2](https://github.com/zimmah/kraken-v2-ws), which uses typed `thiserror` errors, an actor-owned connection with no locks, and deterministic replay tests. See its README for the design notes on reconnect semantics and checksum behavior. The scouter keeps what is specific to itself: path detection, sizing, and the TUI.
+**Market data lives in a crate, arbitrage logic lives here.** The WebSocket connection, subscription handling, book maintenance, and checksum validation were extracted into [kraken-ws-v2](https://github.com/zimmah/kraken-ws-v2), which uses typed `thiserror` errors, an actor-owned connection with no locks, and deterministic replay tests. See its README for the design notes on reconnect semantics and checksum behavior. The scouter keeps what is specific to itself: path detection, sizing, and the TUI.
 
 **Depth-aware sizing over fixed notionals.** More complex, but an arbitrage signal without a realistic executable size is noise. The detector reports what the book can actually absorb.
 
@@ -122,11 +122,11 @@ Real opportunities on a single venue are rare and short-lived. That makes them a
 cargo test
 ```
 
-Coverage here focuses on the scouter's own logic: profitable-path detection, no-opportunity rejection, and checksum-health bookkeeping. Order book invariants, checksum accuracy against Kraken's reference vector, and replay of captured traffic are tested in [kraken-ws-v2](https://github.com/zimmah/kraken-v2-ws), where that code lives. CI builds and runs the test suite on every push.
+Coverage here focuses on the scouter's own logic: profitable-path detection, no-opportunity rejection, and checksum-health bookkeeping. Order book invariants, checksum accuracy against Kraken's reference vector, and replay of captured traffic are tested in [kraken-ws-v2](https://github.com/zimmah/kraken-ws-v2), where that code lives. CI builds and runs the test suite on every push.
 
 ## Status & roadmap
 
-The scouter is the reference application for [kraken-ws-v2](https://github.com/zimmah/kraken-v2-ws), the standalone crate its WebSocket and order book layer was extracted into. Development of connection handling, book maintenance, and checksum validation happens there, with typed errors, documented examples, and deterministic replay tests; the scouter stays a working demonstration of building on top of it.
+The scouter is the reference application for [kraken-ws-v2](https://github.com/zimmah/kraken-ws-v2), the standalone crate its WebSocket and order book layer was extracted into. Development of connection handling, book maintenance, and checksum validation happens there, with typed errors, documented examples, and deterministic replay tests; the scouter stays a working demonstration of building on top of it.
 
 ## License
 
